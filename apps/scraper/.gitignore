@@ -1,0 +1,10 @@
+node_modules
+data/
+output/
+.node
+start.sh
+start-window.sh
+start.cmd
+start-window.cmd
+street-wolf-scraper
+street-wolf-scraper.cmd

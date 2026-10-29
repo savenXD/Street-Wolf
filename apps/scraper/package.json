@@ -1,0 +1,22 @@
+{
+  "name": "@street-wolf/scraper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/cli.ts start",
+    "start:window": "tsx src/cli.ts start --headed",
+    "scrape": "tsx src/cli.ts scrape",
+    "setup": "tsx src/cli.ts setup",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "patchright": "^1.55.0",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.8.0"
+  }
+}
