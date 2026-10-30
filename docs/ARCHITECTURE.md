@@ -1,3 +1,31 @@
+# Street Wolf: architecture
+
+## What the product is
+
+Street Wolf is a free, open-source, **local-first** lead-generation workspace. Someone searches Google Maps for a keyword in a city,
+a scraper running on their own computer fills a sheet with every matching business, and a team works the list: call, WhatsApp,
+label the outcome, write a call summary. The scraper has no account of its own; it talks to the web app with a token.
+
+How a lead moves through it:
+
+1. **Scrape.** A person sets up a sheet (queries, which fields, filters) and presses Start. A job is queued; the local scraper claims
+   it (`/api/jobs/claim`) and pushes rows (`/api/ingest`), which appear live in the open sheet.
+2. **Shortlist and work.** Rows are edited per cell; each row carries one **label** from the campaign's outcome tree. Giving a row a
+   label other than "Didn't pick" counts as outreach, credited once to the person who did it (see DATABASE.md section 4).
+3. **Follow up on a phone.** The sheet's **Mobile Outreach** link opens `/m/<campaign>/<domain>/<city>`, a phone layout of the same
+   sheet using the same store and sync (`apps/web/components/mobile`). Icon buttons call or open WhatsApp from the phone column
+   (`lib/phone.ts` normalises Indian formats), labels sync back, and **Pamphlets** (`lib/pamphlets.ts`) send ready messages or a
+   price image. Access is by normal sign-in; the route is protected in `proxy.ts` and blocked from search engines.
+4. **Call summary.** Every sheet has a `callSummary` column (the 2nd column by default, not part of the scrape setup). It is a normal
+   cell, so it is saved, synced and merged like any other. Points are written `- one - two` and shown by `lib/call-summary.ts` in a
+   dotted window (`components/dashboard/call-summary-dialog.tsx`). Limit: 5,000 characters per cell.
+
+What is not built yet: Instagram, Reddit and X scrapers and outreach (the schema is ready, see the end of this file), editing the
+pamphlet messages in settings (they are fixed defaults, and the pamphlet itself is stored per browser), and a hosted scraper.
+
+Repository map: `apps/web` (UI + API) · `apps/scraper` (local worker) · `packages/db` (types, indexes) · `tools/google-maps` ·
+`packages/tool-sdk` · `scripts` (tests) · `docs`.
+
 # Street Wolf: backend architecture
 
 **Stack:** Next.js 16 (UI + API route handlers on Node) · MongoDB · custom auth (email link + Google) · a durable email outbox.

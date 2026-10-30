@@ -58,7 +58,21 @@ export const fieldGroups: FieldGroup[] = [
 ];
 
 export const allFields = fieldGroups.flatMap((g) => g.fields);
-export const fieldByKey = (key: string) => allFields.find((f) => f.key === key);
+/**
+ * The call summary is not scraped, so it is not in the setup picker. Every sheet has it as the 2nd column by default,
+ * and it is saved like any other cell (so teammates and the phone page see it too).
+ */
+export const SUMMARY_KEY = "callSummary";
+export const summaryField: Field = { key: SUMMARY_KEY, label: "Call summary" };
+export const fieldByKey = (key: string) => (key === SUMMARY_KEY ? summaryField : allFields.find((f) => f.key === key));
+
+/** The data columns of a sheet, in the saved order. A column the person has never placed goes to its default spot: the call summary right after Label (the 2nd column), anything else at the end. */
+export function sheetKeys(cfg: { fields: string[] } | undefined, blank: string[], saved: string[] = []): string[] {
+  const catalog = fieldGroups.flatMap((g) => g.fields.map((f) => f.key));
+  const base = [SUMMARY_KEY, ...(cfg ? catalog.filter((k) => cfg.fields.includes(k)) : blank)];
+  const fresh = base.filter((k) => !saved.includes(k));
+  return [...fresh.filter((k) => k === SUMMARY_KEY), ...saved.filter((k) => base.includes(k)), ...fresh.filter((k) => k !== SUMMARY_KEY)];
+}
 
 export type ScrapeConfig = {
   queries: string[];

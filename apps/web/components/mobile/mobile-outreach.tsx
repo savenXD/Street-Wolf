@@ -10,13 +10,14 @@ import { PamphletsSheet } from "@/components/mobile/pamphlets-sheet";
 import { Sheet } from "@/components/mobile/sheet";
 import { LoadBar } from "@/components/ui/load-bar";
 import { defaultTree, labelById, type LabelNode } from "@/lib/labels";
-import { fieldByKey, fieldGroups } from "@/lib/maps-fields";
+import { fieldByKey, SUMMARY_KEY, sheetKeys } from "@/lib/maps-fields";
+import { CallSummaryDialog } from "@/components/dashboard/call-summary-dialog";
+import { previewSummary } from "@/lib/call-summary";
 import { parsePhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { useSaveState, useWorkspace } from "@/lib/workspace";
 
 const PAGE = 40; // leads drawn at a time; more are added as you scroll
-const catalogOrder = fieldGroups.flatMap((g) => g.fields.map((f) => f.key));
 const blankKeys = ["c1", "c2", "c3", "c4", "c5"];
 /** What a phone shows until you pick more. */
 const DEFAULT_SHOWN = ["name", "phone"];
@@ -60,16 +61,15 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
   const [pick, setPick] = useState<number | null>(null);
   // Pamphlets: opened for one lead (r), or as the plain library from the top bar (-1).
   const [pam, setPam] = useState<number | null>(null);
+  const [note, setNote] = useState<number | null>(null);
 
   const rows = useMemo(() => city.rows ?? [], [city.rows]);
   const labels = useMemo(() => city.labels ?? {}, [city.labels]);
 
   // Same column set and order as the web sheet. Which of them this phone shows is its own choice, remembered per sheet.
   const cfg = city.scrape;
-  const base = cfg ? catalogOrder.filter((k) => cfg.fields.includes(k)) : blankKeys;
-  const saved = city.view?.order ?? [];
-  const keys = [...saved.filter((k) => base.includes(k)), ...base.filter((k) => !saved.includes(k))];
-  const labelOf = (k: string) => (cfg ? (fieldByKey(k)?.label ?? k) : k.toUpperCase());
+  const keys = sheetKeys(cfg, blankKeys, city.view?.order);
+  const labelOf = (k: string) => (cfg || k === SUMMARY_KEY ? (fieldByKey(k)?.label ?? k) : k.toUpperCase());
 
   // Only ever rendered after the workspace has loaded in the browser, so reading localStorage here is safe.
   // null = never chosen, so the defaults apply; an empty list is a real choice (show only the name).
@@ -133,10 +133,20 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
     [labels, setSheet, id, domainId, cityId],
   );
 
+  const saveNote = (r: number, v: string) => {
+    const next = rows.slice();
+    const cell = { ...next[r] };
+    if (v) cell[SUMMARY_KEY] = v;
+    else delete cell[SUMMARY_KEY];
+    next[r] = cell;
+    setSheet(id, domainId, cityId, { rows: next });
+  };
+
   const done = Object.keys(labels).length;
   const phoneKey = keys.includes("phone") ? "phone" : null;
   const nameKey = keys.includes("name") ? "name" : null;
-  const bodyKeys = shown.filter((k) => k !== nameKey);
+  const bodyKeys = shown.filter((k) => k !== nameKey && k !== SUMMARY_KEY);
+  const showNote = shown.includes(SUMMARY_KEY);
 
   return (
     <div className="min-h-dvh bg-neutral-50 pb-[env(safe-area-inset-bottom)]">
@@ -235,7 +245,16 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
                   </div>
                 )}
               </div>
-              <button type="button" onClick={() => setPick(r)} className="mt-3 flex h-10 w-full items-center justify-between rounded-xl bg-neutral-50 px-3 text-left active:bg-neutral-100">
+              {showNote && (
+                <button type="button" onClick={() => setNote(r)} className="mt-3 block w-full rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-left active:bg-neutral-50">
+                  {row[SUMMARY_KEY] ? (
+                    <span className="line-clamp-3 text-sm leading-relaxed text-neutral-700">{previewSummary(row[SUMMARY_KEY])}</span>
+                  ) : (
+                    <span className="text-sm text-neutral-400">Add call summary</span>
+                  )}
+                </button>
+              )}
+              <button type="button" onClick={() => setPick(r)} className="mt-2 flex h-10 w-full items-center justify-between rounded-xl bg-neutral-50 px-3 text-left active:bg-neutral-100">
                 <LabelChip tree={tree} id={labels[r]} />
                 <ChevronRight className="size-4 text-neutral-400" />
               </button>
@@ -271,6 +290,15 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
             })}
           </ul>
         </Sheet>
+      )}
+
+      {note !== null && (
+        <CallSummaryDialog
+          name={(nameKey && rows[note]?.[nameKey]) || `Lead ${note + 1}`}
+          value={rows[note]?.[SUMMARY_KEY] ?? ""}
+          onSave={(v) => saveNote(note, v)}
+          onClose={() => setNote(null)}
+        />
       )}
 
       {pam !== null && (

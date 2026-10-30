@@ -39,7 +39,7 @@ All ids are strings. The browser mints UUIDs itself so the screen updates instan
 | `invites` | `campaignId`, `email`, `role`, `tokenHash`, `invitedBy`, `status` (pending/accepted/revoked), `expiresAt` (14 days) | history kept |
 | `domains` | a niche in a campaign: `name`, `image`, `position` | permanent |
 | `places` | a city in a domain = one sheet: `scrape` config, `view`, `position`, **`stats {leads, outreached, converted}`** | permanent |
-| `leads` | one sheet row: `placeId`, `row`, `cells{}`, `label`, `source`, `sourceId`, `updatedBy`, `edited[]` (cell keys a person typed or cleared; a re-scrape never overwrites them), **`outreachedBy`, `outreachedAt`, `outreachedDay`** | permanent |
+| `leads` | one sheet row: `placeId`, `row`, `cells{}` (free-form keys; scraped fields plus the hand-typed `callSummary`), `label`, `source`, `sourceId`, `updatedBy`, `edited[]` (cell keys a person typed or cleared; a re-scrape never overwrites them), **`outreachedBy`, `outreachedAt`, `outreachedDay`** | permanent |
 | `dailyStats` | `_id`=`campaignId:userId:day`; `outreached`, `converted`, `leads` | permanent, one doc per person per campaign per day |
 | `notifications` | `userId`, `type`, `title`, `body`, `data{}`, `readAt` | TTL 6 months |
 | `emails` | outbox: `to`, `subject`, `html`, `text`, `status`, `attempts`, `nextAttemptAt` | sent rows TTL 30 days |
@@ -203,3 +203,9 @@ reconstructed, place totals can via `recount`); the chart updates for teammates 
 * **Big deletes** (sheet, domain, campaign) remove leads in slices of 5,000 and can be repeated if cut off; saves are capped at 2,000 rows per request; heavy routes ask the host for up to 60 s (`maxDuration`).
 * **Invite links** are stored AES-GCM encrypted (`invites.tokenEnc`, key from `APP_SECRET`); the emailed token itself is only ever stored as a hash.
 * Tests: `pnpm e2e` (API), `pnpm test:merge` (merge rules), `pnpm e2e:browser` (two real browsers on one sheet).
+
+## Call summary and the phone page
+
+* **`callSummary` is an ordinary cell key** on `leads.cells`, up to 5,000 characters like every cell. It is typed by people, so it is in `leads.edited` and a re-scrape never overwrites it. It is not in the scrape setup (`maps-fields.ts` keeps it out of `fieldGroups`); `sheetKeys()` adds it to every sheet as the 2nd column unless a person has dragged it elsewhere (their order is in `places.view.order`).
+* **Points** are text: `- first - second`. A standalone `-` starts a point (`lib/call-summary.ts`); nothing about points is stored.
+* **Mobile Outreach** adds no collections or endpoints. `/m/:campaign/:domain/:city` is a page that uses the same `GET/PATCH …/sheet` and `…/sync` calls and the same optimistic store as the web sheet, behind the same session cookie. The only phone-specific state is in the browser: which columns that phone shows (`sw-mobile-cols:<place>`) and the pamphlet messages and image values (`sw-pamphlets:<campaign>`), neither synced.

@@ -8,13 +8,15 @@ import { BrandIcon } from "@/components/brand-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { defaultTree, labelById, layout } from "@/lib/labels";
-import { fieldByKey, fieldGroups, type ScrapeConfig } from "@/lib/maps-fields";
+import { fieldByKey, SUMMARY_KEY, sheetKeys, type ScrapeConfig } from "@/lib/maps-fields";
+import { previewSummary } from "@/lib/call-summary";
 import { nonOutreachIds } from "@/lib/outreach";
 import { cn } from "@/lib/utils";
 import { LoadBar } from "@/components/ui/load-bar";
 import { type Campaign, type City, type Domain, useWorkspace } from "@/lib/workspace";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { CsvImport, type ImportMode, type ImportRecord } from "./csv-import";
+import { CallSummaryDialog } from "./call-summary-dialog";
 import { LabelChip } from "./label-chip";
 import { LabelEditor } from "./label-editor";
 import { LabelGraph } from "./label-graph";
@@ -32,7 +34,6 @@ const HEAD_H = 72;
 const ROW_NUM_W = 48;
 const MIN_W = 64;
 const blankKeys = ["c1", "c2", "c3", "c4", "c5"];
-const catalogOrder = fieldGroups.flatMap((g) => g.fields.map((f) => f.key));
 
 type Row = Record<string, string>;
 type Pos = [number, number];
@@ -90,6 +91,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const [editingLabels, setEditingLabels] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [summaryRow, setSummaryRow] = useState<number | null>(null);
   const [setupKey, setSetupKey] = useState(0);
   // Columns the person removed in the setup drawer, waiting for a "yes, delete their data".
   const [dropAsk, setDropAsk] = useState<{ config: ScrapeConfig; dropped: string[]; withData: string[] } | null>(null);
@@ -101,7 +103,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const [draft, setDraft] = useState("");
   const [resize, setResize] = useState<{ key: string; w: number } | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
-  const [overKey, setOverKey] = useState<string | null>(null);
+  // Where a dragged column would land: before or after this one. (Dropping on the Label column means "first".)
+  const [over, setOver] = useState<{ key: string; side: "before" | "after" } | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [csv, setCsv] = useState<{ name: string; data: string[][] } | null>(null);
@@ -136,10 +139,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
 
   const cfg = city.scrape;
   // Data columns are whatever was picked in the scrape setup (blank before that), in the user's order. Column A is always Label.
-  const base = cfg ? catalogOrder.filter((k) => cfg.fields.includes(k)) : blankKeys;
-  const saved = city.view?.order ?? [];
-  const keys = [...saved.filter((k) => base.includes(k)), ...base.filter((k) => !saved.includes(k))];
-  const cols = [{ key: "label", label: "Label" }, ...keys.map((k) => ({ key: k, label: cfg ? (fieldByKey(k)?.label ?? k) : "" }))];
+  const keys = sheetKeys(cfg, blankKeys, city.view?.order);
+  const cols = [{ key: "label", label: "Label" }, ...keys.map((k) => ({ key: k, label: k === SUMMARY_KEY || cfg ? (fieldByKey(k)?.label ?? k) : "" }))];
   const colCount = cols.length;
   const rows = useMemo(() => city.rows ?? [], [city.rows]);
   const labels = useMemo(() => city.labels ?? {}, [city.labels]);
@@ -237,6 +238,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
 
   const startEdit = (r: number, c: number, initial?: string) => {
     if (c === 0) return;
+    // The call summary is long and written in points, so it gets its own window instead of a one-line box.
+    if (cols[c].key === SUMMARY_KEY) return setSummaryRow(r);
     setDraft(initial ?? cellText(r, c));
     setEditing([r, c]);
   };
@@ -452,19 +455,23 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
     window.addEventListener("mouseup", up);
   };
 
-  const dropOn = (target: string) => {
-    if (dragKey && dragKey !== target) {
-      const from = keys.indexOf(dragKey);
-      const to = keys.indexOf(target);
+  const dropOn = (target: { key: string; side: "before" | "after" }) => {
+    if (dragKey && dragKey !== target.key) {
       const next = keys.filter((k) => k !== dragKey);
-      next.splice(to, 0, dragKey);
-      if (from !== to) {
+      next.splice(next.indexOf(target.key) + (target.side === "after" ? 1 : 0), 0, dragKey);
+      if (next.join() !== keys.join()) {
         commit({ order: next });
         setSel({ a: [sel.a[0], next.indexOf(dragKey) + 1], f: [sel.a[0], next.indexOf(dragKey) + 1] });
       }
     }
     setDragKey(null);
-    setOverKey(null);
+    setOver(null);
+  };
+  /** The drop spot under the pointer: the left half of a header is "before" it, the right half "after". The Label column can't move, so a drop there means first. */
+  const dropSpot = (i: number, e: React.DragEvent<HTMLElement>) => {
+    if (i === 0) return keys.length ? { key: keys[0], side: "before" as const } : null;
+    const r = e.currentTarget.getBoundingClientRect();
+    return { key: cols[i].key, side: e.clientX < r.left + r.width / 2 ? ("before" as const) : ("after" as const) };
   };
 
   const first = Math.max(0, Math.floor(view.top / rowH) - OVERSCAN);
@@ -572,25 +579,27 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                   <th
                     key={c.key}
                     onDragOver={(e) => {
-                      if (dragKey && i > 0) {
+                      if (dragKey) {
                         e.preventDefault();
-                        setOverKey(c.key);
+                        const spot = dropSpot(i, e);
+                        if (spot && (spot.key !== over?.key || spot.side !== over.side)) setOver(spot);
                       }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      if (i > 0) dropOn(c.key);
+                      const spot = dropSpot(i, e);
+                      if (spot) dropOn(spot);
                     }}
                     className={cn(
                       "relative h-10 border-b border-r border-neutral-200 bg-white p-0 text-left text-sm font-semibold",
-                      overKey === c.key && dragKey !== c.key && "shadow-[inset_3px_0_0_#059669]",
+                      over?.key === c.key && dragKey !== c.key && (over.side === "before" ? "shadow-[inset_3px_0_0_#059669]" : "shadow-[inset_-3px_0_0_#059669]"),
                       dragKey === c.key && "opacity-40",
                     )}
                   >
                     <div
                       draggable={i > 0}
                       onDragStart={(e) => (e.dataTransfer.setData("text/plain", c.key), setDragKey(c.key))}
-                      onDragEnd={() => (setDragKey(null), setOverKey(null))}
+                      onDragEnd={() => (setDragKey(null), setOver(null))}
                       className={cn("flex h-full items-center gap-1 px-3", i > 0 && "cursor-grab active:cursor-grabbing")}
                       title={i > 0 ? "Drag to move this column" : undefined}
                     >
@@ -640,7 +649,11 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                         onMouseEnter={() => {
                           if (dragging.current) setSel((s) => ({ a: s.a, f: [r, i] }));
                         }}
-                        onClick={(e) => i === 0 && single && !e.shiftKey && setPicker({ row: r, rect: e.currentTarget.getBoundingClientRect() })}
+                        onClick={(e) => {
+                          if (!single || e.shiftKey) return;
+                          if (i === 0) setPicker({ row: r, rect: e.currentTarget.getBoundingClientRect() });
+                          else if (c.key === SUMMARY_KEY) setSummaryRow(r);
+                        }}
                         onDoubleClick={() => i > 0 && startEdit(r, i)}
                         className={cn(
                           "h-9 cursor-cell select-none overflow-hidden text-ellipsis whitespace-nowrap border-b border-r border-neutral-100 px-3",
@@ -678,6 +691,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                           />
                         ) : i === 0 ? (
                           <LabelChip tree={tree} id={labels[r]} />
+                        ) : c.key === SUMMARY_KEY ? (
+                          previewSummary(rows[r]?.[c.key] ?? "")
                         ) : (
                           rows[r]?.[c.key]
                         )}
@@ -722,6 +737,15 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
             setRowLabel(picker.row, null);
             closePicker();
           }}
+        />
+      )}
+
+      {summaryRow !== null && (
+        <CallSummaryDialog
+          name={rows[summaryRow]?.name ?? ""}
+          value={rows[summaryRow]?.[SUMMARY_KEY] ?? ""}
+          onSave={(v) => commit({ rows: withCells([{ r: summaryRow, key: SUMMARY_KEY, v }]) })}
+          onClose={() => (setSummaryRow(null), grid.current?.focus())}
         />
       )}
 
