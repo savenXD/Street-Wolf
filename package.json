@@ -10,7 +10,8 @@
     "e2e": "node scripts/e2e.mjs",
     "scraper:package": "node scripts/package-scraper.mjs",
     "e2e:browser": "node scripts/e2e-browser.mjs",
-    "test:merge": "npx --yes tsx scripts/sheet-merge.test.ts"
+    "test:merge": "npx --yes tsx scripts/sheet-merge.test.ts",
+    "test:phone": "npx --yes tsx scripts/phone.test.ts"
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0",

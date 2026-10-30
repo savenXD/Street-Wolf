@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Download, GripVertical, Upload, SlidersHorizontal, Tags } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, GripVertical, Smartphone, Upload, SlidersHorizontal, Tags } from "lucide-react";
 import Link from "next/link";
 import { AnimatePresence } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -89,6 +89,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const { setScrape, setSheet, setLabelTree, syncSheet } = useWorkspace();
   const [editingLabels, setEditingLabels] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [setupKey, setSetupKey] = useState(0);
   // Columns the person removed in the setup drawer, waiting for a "yes, delete their data".
   const [dropAsk, setDropAsk] = useState<{ config: ScrapeConfig; dropped: string[]; withData: string[] } | null>(null);
@@ -524,6 +525,9 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
           <Button variant="outline" size="sm" disabled={leadCount === 0 && Object.keys(labels).length === 0} onClick={exportCsv}>
             <Download className="size-4" /> Export CSV
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setMobileOpen(true)}>
+            <Smartphone className="size-4" /> Mobile Outreach
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setEditingLabels(true)}>
             <Tags className="size-4" /> Edit labels
           </Button>
@@ -721,6 +725,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
         />
       )}
 
+      <MobileLink open={mobileOpen} onClose={() => setMobileOpen(false)} path={`/m/${id}/${domainId}/${cityId}`} />
+
       {csv && (
         <CsvImport
           fileName={csv.name}
@@ -766,5 +772,40 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** The phone version of this sheet: same leads and labels, a layout built for one thumb. Opening it needs a sign-in to an account on this campaign. */
+function MobileLink({ open, onClose, path }: { open: boolean; onClose: () => void; path: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!open) return null;
+  const url = `${window.location.origin}${path}`;
+  const local = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {}
+  };
+  return (
+    <Dialog open onClose={onClose} title="Mobile Outreach" description="Open this link on your phone to call and WhatsApp your leads and set labels. Everything syncs with this sheet.">
+      <div className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-1.5 pl-3">
+        <input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 bg-transparent text-sm outline-none" aria-label="Mobile link" />
+        <Button size="sm" onClick={copy}>
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />} {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <ul className="mt-4 space-y-1.5 text-sm text-neutral-500">
+        <li>Sign in on your phone with the same account. Only people on this campaign can open it.</li>
+        <li>Shows name and phone by default; pick more columns from the top bar.</li>
+        {local && <li className="text-amber-700">This is a local address, so a phone can only open it on the same Wi-Fi as this computer.</li>}
+      </ul>
+      {typeof navigator !== "undefined" && "share" in navigator && (
+        <Button variant="outline" size="sm" className="mt-5 w-full" onClick={() => void navigator.share({ title: "Mobile Outreach", url }).catch(() => undefined)}>
+          Share link
+        </Button>
+      )}
+    </Dialog>
   );
 }

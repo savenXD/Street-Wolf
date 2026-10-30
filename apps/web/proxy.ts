@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Routes that need an account (real accounts only; there is no guest mode). This only checks that a session cookie exists (cheap, runs on every request);
 // the real check, against the database, happens in the API and on the client when it loads /api/bootstrap.
-const PROTECTED = ["/dashboard", "/new", "/onboarding", "/c/"];
+const PROTECTED = ["/dashboard", "/new", "/onboarding", "/c/", "/m/"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
