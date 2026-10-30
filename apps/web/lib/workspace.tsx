@@ -51,7 +51,7 @@ export const useSaveState = (pid: string): SaveState =>
 /** A niche to hunt (lawyers, clinics...) with the places (cities) it is scraped in. */
 export type Domain = { id: string; name: string; /** Cover image URL shown on the domain card. */ image?: string; cities: City[] };
 export type CampaignMember = { userId: string; role: Role; name: string; email: string; avatarUrl: string | null };
-export type PendingInvite = { id: string; email: string; role: string; at: number };
+export type PendingInvite = { id: string; email: string; role: string; at: number; /** Share link; only sent to owners and admins. Works for that email address only. */ link?: string };
 export type ServerStats = { totals: Counts; perMember: Record<string, Counts>; perDay: Record<string, number[]> };
 export type Campaign = {
   id: string; name: string; purpose: string; features: string[]; team: string[]; domains: Domain[];
@@ -126,7 +126,8 @@ type Workspace = {
   clearError: () => void;
   refresh: () => Promise<void>;
   updateProfile: (patch: Partial<Pick<Local, "name" | "role" | "welcomed">>) => void;
-  removeInvite: (email: string) => void;
+  /** Revokes pending invites for this email, in one campaign or (without `campaignId`) in all of them. */
+  removeInvite: (email: string, campaignId?: string) => void;
   addTeamMember: (campaignId: string, email: string) => void;
   setMemberRole: (campaignId: string, userId: string, role: "admin" | "member") => void;
   removeMember: (campaignId: string, userId: string) => void;
@@ -450,8 +451,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         mutate((l) => ({ ...l, campaigns: l.campaigns.map((c) => (c.id === campaignId && !c.team.includes(email) ? { ...c, team: [...c.team, email] } : c)) }));
         api(call("POST", `/api/campaigns/${campaignId}/invites`, { email }).then(refresh));
       },
-      removeInvite: (email) => {
-        for (const c of local.campaigns) for (const i of c.pendingInvites ?? []) if (i.email === email) api(call("DELETE", `/api/campaigns/${c.id}/invites/${i.id}`).then(refresh));
+      removeInvite: (email, campaignId) => {
+        for (const c of local.campaigns) if (!campaignId || c.id === campaignId) for (const i of c.pendingInvites ?? []) if (i.email === email) api(call("DELETE", `/api/campaigns/${c.id}/invites/${i.id}`).then(refresh));
       },
       setMemberRole: (cid, userId, role) => api(call("PATCH", `/api/campaigns/${cid}/members/${userId}`, { role }).then(refresh)),
       removeMember: (cid, userId) => api(call("DELETE", `/api/campaigns/${cid}/members/${userId}`).then(refresh)),

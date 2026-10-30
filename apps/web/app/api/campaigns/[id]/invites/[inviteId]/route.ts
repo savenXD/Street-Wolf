@@ -6,7 +6,7 @@ import { requireBrowserUser } from "@/lib/server/session";
 export const DELETE = api<{ id: string; inviteId: string }>(async (req, { id, inviteId }) => {
   const user = await requireBrowserUser(req);
   await requireRole(id, user._id, "admin");
-  const r = await (await col("invites")).updateOne({ _id: inviteId, campaignId: id, status: "pending" }, { $set: { status: "revoked" } });
+  const r = await (await col("invites")).updateOne({ _id: inviteId, campaignId: id, status: "pending" }, { $set: { status: "revoked" }, $unset: { token: "" } });
   if (!r.matchedCount) throw notFound("Invite not found");
   return ok({ ok: true });
 });

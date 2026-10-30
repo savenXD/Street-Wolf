@@ -20,7 +20,7 @@ export async function createInvite(p: { campaign: Campaign; inviter: User; email
 
   const token = newToken();
   const now = new Date();
-  const fields = { tokenHash: sha256(token), invitedBy: p.inviter._id, role: p.role, createdAt: now, expiresAt: new Date(now.getTime() + INVITE_DAYS * 86400_000) };
+  const fields = { tokenHash: sha256(token), token, invitedBy: p.inviter._id, role: p.role, createdAt: now, expiresAt: new Date(now.getTime() + INVITE_DAYS * 86400_000) };
   // One open invite per person: re-inviting refreshes the link instead of creating a second row.
   const before = await invites.findOneAndUpdate({ campaignId: p.campaign._id, email: p.email, status: "pending" }, { $set: fields }, { returnDocument: "before" });
   let id = before?._id;
@@ -47,7 +47,7 @@ export async function acceptInvite(invite: Invite, user: User) {
     { $setOnInsert: { _id: newId(), campaignId: invite.campaignId, userId: user._id, role: invite.role, addedBy: invite.invitedBy, createdAt: new Date() } },
     { upsert: true },
   );
-  const flipped = await invites.updateOne({ _id: invite._id, status: "pending" }, { $set: { status: "accepted", acceptedBy: user._id, acceptedAt: new Date() } });
+  const flipped = await invites.updateOne({ _id: invite._id, status: "pending" }, { $set: { status: "accepted", acceptedBy: user._id, acceptedAt: new Date() }, $unset: { token: "" } });
   if (flipped.modifiedCount) {
     const campaign = await (await col("campaigns")).findOne({ _id: invite.campaignId });
     const who = user.name || user.email;

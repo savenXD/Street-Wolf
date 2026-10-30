@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { LinkPending, Spinner } from "./spinner";
 import type { ComponentProps } from "react";
 
 const variants = {
@@ -16,12 +17,23 @@ const sizes = {
 type Style = { variant?: keyof typeof variants; size?: keyof typeof sizes };
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950";
+  "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-[color,background-color,transform] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950";
 
-export function Button({ variant = "primary", size = "md", className, ...props }: ComponentProps<"button"> & Style) {
-  return <button className={cn(base, variants[variant], sizes[size], className)} {...props} />;
+/** `loading` shows a spinner in place of the leading icon, blocks repeat clicks, and keeps the label so the button doesn't jump. */
+export function Button({ variant = "primary", size = "md", loading, className, children, disabled, ...props }: ComponentProps<"button"> & Style & { loading?: boolean }) {
+  return (
+    <button className={cn(base, variants[variant], sizes[size], loading && "cursor-progress", className)} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
+      {loading && <Spinner />}
+      {children}
+    </button>
+  );
 }
 
-export function ButtonLink({ variant = "primary", size = "md", className, ...props }: ComponentProps<typeof Link> & Style) {
-  return <Link className={cn(base, variants[variant], sizes[size], className)} {...props} />;
+export function ButtonLink({ variant = "primary", size = "md", className, children, ...props }: ComponentProps<typeof Link> & Style) {
+  return (
+    <Link className={cn(base, variants[variant], sizes[size], className)} {...props}>
+      <LinkPending />
+      {children}
+    </Link>
+  );
 }

@@ -5,6 +5,7 @@ import {
   siGooglemaps,
   siGooglesheets,
   siInstagram,
+  siPhonepe,
   siReddit,
   siTiktok,
   siWhatsapp,
@@ -19,6 +20,7 @@ const icons = {
   googlemaps: siGooglemaps,
   googlesheets: siGooglesheets,
   instagram: siInstagram,
+  phonepe: siPhonepe,
   reddit: siReddit,
   x: siX,
   elevenlabs: siElevenlabs,
@@ -29,6 +31,12 @@ const icons = {
 } satisfies Record<string, SimpleIcon>;
 
 export type BrandName = keyof typeof icons;
+
+/** Raw path + brand colour, for drawing a logo inside a larger SVG. */
+export function brandIcon(name: BrandName) {
+  const { path, hex } = icons[name];
+  return { path, color: `#${hex}` };
+}
 
 export function BrandIcon({ name, className = "size-5", colored }: { name: BrandName; className?: string; colored?: boolean }) {
   const icon = icons[name];

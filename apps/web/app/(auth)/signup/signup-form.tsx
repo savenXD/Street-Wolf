@@ -10,14 +10,19 @@ export function SignupForm({ next }: { next: string }) {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [googling, setGoogling] = useState(false);
   const [devLink, setDevLink] = useState<string | null>(null);
 
   async function withGoogle() {
+    setGoogling(true);
     const p = await fetch("/api/auth/providers").then((r) => r.json()).catch(() => ({ google: false }));
     // Full navigation on purpose: this is an API route that redirects to Google.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     if (p.google) window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
-    else setMessage("Google sign-in isn't switched on yet. Use the email link below.");
+    else {
+      setGoogling(false);
+      setMessage("Google sign-in isn't switched on yet. Use the email link below.");
+    }
   }
 
   async function withEmail(e: React.FormEvent) {
@@ -53,8 +58,8 @@ export function SignupForm({ next }: { next: string }) {
 
   return (
     <div className="mt-8 space-y-6">
-      <Button variant="outline" className="w-full" onClick={withGoogle}>
-        <GoogleLogo />
+      <Button variant="outline" className="w-full" onClick={withGoogle} loading={googling}>
+        {!googling && <GoogleLogo />}
         Continue with Google
       </Button>
       <div className="flex items-center gap-3 text-xs text-neutral-400">
@@ -65,7 +70,7 @@ export function SignupForm({ next }: { next: string }) {
           <Label htmlFor="email">Email</Label>
           <Input id="email" type="email" required placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <Button type="submit" className="w-full" disabled={state === "sending"}>
+        <Button type="submit" className="w-full" loading={state === "sending"}>
           {state === "sending" ? "Sending…" : "Email me a link"}
         </Button>
       </form>

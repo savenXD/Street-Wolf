@@ -1,5 +1,6 @@
 "use client";
 
+import { LinkPending } from "@/components/ui/spinner";
 import { ArrowLeft, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -136,7 +137,8 @@ function DomainCard({ campaign, domain, detailed }: { campaign: Campaign; domain
           const st = cityStats(c, campaign.labelTree);
           return detailed ? (
             <div key={c.id} className="group/chip relative rounded-2xl border border-neutral-200 transition-colors hover:border-neutral-950">
-              <Link href={`/dashboard/maps/${campaign.id}/${domain.id}/${c.id}`} className="block p-4">
+              <Link href={`/dashboard/maps/${campaign.id}/${domain.id}/${c.id}`} className="relative block p-4">
+                <LinkPending overlay />
                 <span className="block truncate pr-4 text-sm font-medium">{c.name}</span>
                 <span className="mt-3 grid grid-cols-2 divide-x divide-neutral-100">
                   <span className="pr-3"><Mini left label="Leads" value={st.leads} /></span>
@@ -161,6 +163,7 @@ function DomainCard({ campaign, domain, detailed }: { campaign: Campaign; domain
             <span key={c.id} className="group/chip inline-flex items-center rounded-full border border-neutral-300 transition-colors hover:border-neutral-950">
               <Link href={`/dashboard/maps/${campaign.id}/${domain.id}/${c.id}`} className="flex items-center gap-2 py-1.5 pl-3.5 pr-2 text-sm">
                 {c.name}
+                <LinkPending />
                 <span className="rounded-full bg-neutral-100 px-1.5 text-xs tabular-nums text-neutral-500">{st.leads}</span>
               </Link>
               <button

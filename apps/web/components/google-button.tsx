@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
@@ -17,14 +18,16 @@ export function GoogleLogo({ className = "size-4" }: { className?: string }) {
 
 export function GoogleButton({ className, size, next, children = "Sign in with Google" }: { className?: string; size?: "sm" | "md" | "lg"; next?: string; children?: React.ReactNode }) {
   const { signInWithGoogle } = useWorkspace();
+  const [busy, setBusy] = useState(false);
   return (
     <Button
       variant="outline"
       size={size}
-      onClick={() => signInWithGoogle(next)}
+      loading={busy}
+      onClick={() => { setBusy(true); void signInWithGoogle(next).finally(() => setBusy(false)); }}
       className={cn("w-full border-neutral-950 bg-transparent hover:bg-neutral-50", className)}
     >
-      <GoogleLogo />
+      {!busy && <GoogleLogo />}
       {children}
     </Button>
   );

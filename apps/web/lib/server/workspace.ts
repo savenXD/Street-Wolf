@@ -1,5 +1,6 @@
 import "server-only";
 import { col, type Role } from "@street-wolf/db";
+import { inviteUrl } from "./invites";
 
 export const DAYS = 14;
 export type Counts = { leads: number; outreached: number; converted: number };
@@ -105,7 +106,11 @@ export async function loadWorkspace(userId: string, only?: string[]) {
           const u = person.get(m.userId);
           return { userId: m.userId, role: m.role, name: u?.name ?? "", email: u?.email ?? "", avatarUrl: u?.avatarUrl ?? null };
         }),
-        invites: (mPending.get(c._id) ?? []).map((i) => ({ id: i._id, email: i.email, role: i.role, at: i.createdAt.getTime() })),
+        invites: (mPending.get(c._id) ?? []).map((i) => ({
+          id: i._id, email: i.email, role: i.role, at: i.createdAt.getTime(),
+          // Only people who can invite get to copy the link.
+          ...(i.token && myRole.get(c._id) !== "member" ? { link: inviteUrl(i.token) } : {}),
+        })),
         team: (mPending.get(c._id) ?? []).map((i) => i.email),
         domains: (mDomains.get(c._id) ?? []).map((d) => ({
           id: d._id,

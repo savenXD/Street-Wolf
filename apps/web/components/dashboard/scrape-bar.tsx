@@ -115,11 +115,11 @@ export function ScrapeBar({ id, domainId, cityId, queries, resetKey = 0 }: { id:
       )}
       <div className={cn("flex flex-wrap items-center gap-x-6 gap-y-3", finished && "pr-6")}>
         <div className="flex items-center gap-1.5">
-          <Button size="sm" disabled={active || busy} onClick={() => act(() => startScrape(id, domainId, cityId))}>
-            <Play className="size-4" /> {job && !active ? "Run again" : "Start"}
+          <Button size="sm" loading={busy && !active} disabled={active} onClick={() => act(() => startScrape(id, domainId, cityId))}>
+            {!(busy && !active) && <Play className="size-4" />} {job && !active ? "Run again" : "Start"}
           </Button>
-          <Button size="sm" variant="outline" disabled={!active || busy} onClick={() => job && act(() => stopScrape(job.id))}>
-            <Square className="size-4" /> Stop
+          <Button size="sm" variant="outline" loading={busy && active} disabled={!active} onClick={() => job && act(() => stopScrape(job.id))}>
+            {!(busy && active) && <Square className="size-4" />} Stop
           </Button>
         </div>
         <div className="min-w-48 flex-1">

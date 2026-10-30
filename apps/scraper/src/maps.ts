@@ -237,8 +237,14 @@ async function clickQuery(a: ClickArgs): Promise<number> {
     best = Math.max(best, Math.min(0.98, done / Math.max(1, denom)));
     hooks.onProgress({ done: a.qi + best, total: cfg.queries.length, found: a.foundBefore + added + out.length, note: `${a.query}: ${done} checked, ${listed} listed` });
   };
-  const flush = async (force = false) => {
-    if (out.length >= 1 || (force && out.length)) {
+  // Rows are saved strictly in the order Maps lists the businesses, however the tabs happen to finish: a result waits in
+  // `ranked` until every business above it has been saved or skipped. Saves are chained so two batches can't overtake each other.
+  const ranked = new Map<number, Row | null>();
+  let nextRank = 0;
+  let chain: Promise<void> = Promise.resolve();
+  const flush = (): Promise<void> => {
+    const run = chain.then(async () => {
+      if (!out.length) return;
       const batch = out.splice(0);
       try {
         await hooks.onRows(batch);
@@ -246,7 +252,17 @@ async function clickQuery(a: ClickArgs): Promise<number> {
         throw new SaveError(`Couldn't save to Street Wolf: ${(e as Error).message}`);
       }
       added += batch.length;
+    });
+    chain = run.catch(() => {});
+    return run;
+  };
+  const settle = (rank: number, row: Row | null) => {
+    ranked.set(rank, row);
+    for (let r = ranked.get(nextRank); ranked.has(nextRank); r = ranked.get(nextRank)) {
+      ranked.delete(nextRank++);
+      if (r) out.push(r);
     }
+    return flush();
   };
   const track = (p: Promise<void>) => {
     pending.add(p);
@@ -300,23 +316,23 @@ async function clickQuery(a: ClickArgs): Promise<number> {
     T("close", t);
 
     done++;
-    if (filters.website === "has" && !d.website) return progress();
-    if (filters.website === "none" && d.website) return progress();
-    if (filters.mustHavePhone && !d.phone) return progress();
-    if (kept >= a.limit) return progress();
+    const skip = (filters.website === "has" && !d.website) || (filters.website === "none" && d.website) || (filters.mustHavePhone && !d.phone) || kept >= a.limit;
+    if (skip) {
+      await settle(idx, null);
+      return progress();
+    }
     kept++;
     if (a.needEnrich && d.website) {
       while (pending.size >= 6) await Promise.race(pending);
       const site = d.website;
       track(
         enrich(site)
-          .then((contact) => void out.push({ sourceId: c.id, cells: build(c, d, cfg.fields, contact) }))
-          .catch(() => void out.push({ sourceId: c.id, cells: build(c, d, cfg.fields, {}) }))
-          .then(() => flush().catch((e) => void (fatal ??= e))),
+          .then((contact) => ({ sourceId: c.id, cells: build(c, d, cfg.fields, contact) }), () => ({ sourceId: c.id, cells: build(c, d, cfg.fields, {}) }))
+          .then((row) => settle(idx, row))
+          .catch((e) => void (fatal ??= e)),
       );
     } else {
-      out.push({ sourceId: c.id, cells: build(c, d, cfg.fields, {}) });
-      await flush();
+      await settle(idx, { sourceId: c.id, cells: build(c, d, cfg.fields, {}) });
     }
     progress();
   }
@@ -337,6 +353,7 @@ async function clickQuery(a: ClickArgs): Promise<number> {
         stale = 0;
         if (!passes(c, cfg, seenIds)) {
           done++;
+          await settle(idx, null);
           progress();
           continue;
         }
@@ -355,6 +372,7 @@ async function clickQuery(a: ClickArgs): Promise<number> {
           if (n >= 3) {
             claimed.add(c.id);
             done++;
+            await settle(idx, null);
             hooks.log(`Skipped ${c.name}: ${(e as Error).message.split("\n")[0]}`, "warn");
           }
           if (++fails >= 4) throw new Error("This tab got stuck");
@@ -414,7 +432,13 @@ async function clickQuery(a: ClickArgs): Promise<number> {
   await Promise.all(Array.from({ length: pacer.max }, (_, slot) => worker(slot)));
   if (process.env.SW_DEBUG) hooks.log(`  [all workers done] pending enrich: ${pending.size}`);
   await Promise.all(pending);
-  await flush(true);
+  // Anything still waiting behind a gap (a tab that died mid-business) goes out in list order rather than being lost.
+  for (const rank of [...ranked.keys()].sort((x, y) => x - y)) {
+    const r = ranked.get(rank);
+    if (r) out.push(r);
+  }
+  ranked.clear();
+  await flush();
   if (process.env.SW_DEBUG) hooks.log("  [flushed]");
   if (fatal) throw fatal;
   return added;

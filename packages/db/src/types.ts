@@ -86,6 +86,8 @@ export type Invite = {
   email: string;
   role: Exclude<Role, "owner">;
   tokenHash: string;
+  /** The share link's secret, kept so admins can copy it again while the invite is open. Dropped when the invite closes. */
+  token?: string;
   invitedBy: string;
   status: InviteStatus;
   createdAt: Date;

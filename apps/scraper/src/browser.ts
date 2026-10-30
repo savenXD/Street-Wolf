@@ -1,11 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "patchright";
 import type { Proxy, ProxyPool } from "./proxies";
 
-const UAS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-];
-
 /**
  * One browser, one live context at a time. `rotate()` swaps in a fresh context (new cookies, next proxy) after a block or
  * after enough pages that a long-lived session starts to look odd. Pages opened on the old context finish and are discarded.
@@ -25,9 +20,7 @@ export class Session {
     this.proxy = this.pool.current();
     const ctx = await this.browser.newContext({
       locale: "en-US",
-      timezoneId: "America/New_York",
-      viewport: { width: 1280 + Math.floor(Math.random() * 200), height: 860 + Math.floor(Math.random() * 100) },
-      userAgent: UAS[Math.floor(Math.random() * UAS.length)],
+      viewport: { width: 1366, height: 900 },
       ...(this.proxy ? { proxy: this.proxy } : {}),
     });
     // Images, fonts and media are most of the bytes and none of the data.

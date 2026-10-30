@@ -1,5 +1,6 @@
 "use client";
 
+import { LinkPending } from "@/components/ui/spinner";
 import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
@@ -29,7 +30,7 @@ export const outreachPerDay: number[] = Array<number>(DAYS).fill(0);
 export const memberColors = ["#f97316", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#06b6d4", "#eab308", "#ef4444"];
 export const memberColor = (i: number) => memberColors[i % memberColors.length];
 
-export type Member = { userId?: string; /** Outreach done today (the person's own day). */ today: number; label: string; src: string | null; role: string; status: string; color: string };
+export type Member = { userId?: string; /** Outreach done today (the person's own day). */ today: number; label: string; src: string | null; role: string; status: string; color: string; inviteLink?: string };
 
 const roleLabel = { owner: "Owner", admin: "Admin", member: "Member" } as const;
 
@@ -44,7 +45,10 @@ export function useMembers(campaign: Campaign): Member[] {
         .sort((a, b) => (a.userId === userId ? -1 : b.userId === userId ? 1 : 0))
         .map((m) => ({ userId: m.userId, today: todayOf(m.userId), label: m.name || m.email, src: m.avatarUrl, role: roleLabel[m.role], status: roleLabel[m.role] }))
     : [{ today: 0, label: name || email || "You", src: avatarUrl, role: "Owner", status: "Owner" }];
-  const invited = campaign.team.map((t) => ({ today: 0, label: t, src: null, role: "Invited", status: "Invited · not joined yet" }));
+  const invited = campaign.team.map((t) => ({
+    today: 0, label: t, src: null, role: "Invited", status: "Invited · not joined yet",
+    inviteLink: campaign.pendingInvites?.find((i) => i.email === t)?.link,
+  }));
   return [...people, ...invited].map((m, i) => ({ ...m, color: memberColor(i) }));
 }
 
@@ -130,8 +134,26 @@ export function OutreachChart({ series, className, title = "Outreach per day" }:
   );
 }
 
+/** "Invite" tag with a small "Copy" button that puts the working share link on the clipboard. */
+function InviteLink({ link }: { link: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-xs">
+      <span className="rounded-md border border-neutral-200 px-2 py-1 text-neutral-500">Invite</span>
+      <button
+        type="button"
+        title="Copy invite link. It only works for the invited email."
+        onClick={() => navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
+        className="rounded-md bg-neutral-950 px-2 py-1 font-medium text-white hover:bg-neutral-800"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </span>
+  );
+}
+
 export function CampaignView({ campaign }: { campaign: Campaign }) {
-  const { addTeamMember } = useWorkspace();
+  const { addTeamMember, removeInvite } = useWorkspace();
   const members = useMembers(campaign);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
@@ -179,6 +201,7 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
             className="flex items-center gap-1 rounded-full border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 hover:border-neutral-950 hover:text-neutral-950"
           >
             Detailed view
+            <LinkPending />
             <ArrowUpRight className="size-3.5" />
           </Link>
           {campaign.myRole !== "member" && (
@@ -230,6 +253,17 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
                 <span className="block truncate text-sm font-medium">{m.label}</span>
                 <span className="block text-xs text-neutral-500">{m.status}</span>
               </span>
+              {m.inviteLink && <InviteLink link={m.inviteLink} />}
+              {!m.userId && (
+                <button
+                  type="button"
+                  title="Revoke this invite"
+                  onClick={() => removeInvite(m.label, campaign.id)}
+                  className="shrink-0 rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-500 hover:border-neutral-950 hover:text-neutral-950"
+                >
+                  Revoke
+                </button>
+              )}
               {m.userId && (
                 <span className="shrink-0 text-right" title="Outreach done today">
                   <span className="block font-brand text-xl font-bold leading-none tracking-[-0.03em] tabular-nums">{m.today}</span>
@@ -250,6 +284,7 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
             href={`/dashboard/maps/${campaign.id}`}
             className="group relative flex aspect-[2.6/1] w-full flex-col justify-end overflow-hidden rounded-3xl border border-neutral-200 p-5 transition-all hover:-translate-y-0.5 hover:border-neutral-950 hover:shadow-lg"
           >
+            <LinkPending overlay />
             {/* Map-style illustration */}
             <svg aria-hidden viewBox="0 0 160 160" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 -z-0 h-full w-full">
               <rect width="160" height="160" fill="#f2efe9" />

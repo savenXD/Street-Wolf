@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { BookOpen, Check, Copy } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SCRAPER_HEALTH_URL } from "@/lib/scraper";
@@ -83,8 +83,8 @@ export function ScraperStatus() {
       <span className={cn("size-1.5 shrink-0 rounded-full", status === "checking" ? "animate-pulse bg-neutral-300" : connected ? "bg-emerald-500" : "bg-amber-400")} />
       <span>{status === "checking" ? "Checking scraper…" : connected ? "Scraper connected" : "Scraper not connected"}</span>
       {status === "offline" && (
-        <Link href="/dashboard/scraper-guide" className="inline-flex h-6 items-center rounded-full bg-neutral-950 px-2.5 text-xs font-medium text-white hover:bg-neutral-800">
-          Guide
+        <Link href="/dashboard/scraper-guide" className="inline-flex h-6 items-center gap-1 rounded-full bg-neutral-950 px-2.5 text-xs font-medium text-white hover:bg-neutral-800">
+          <BookOpen className="size-3" /> Guide
         </Link>
       )}
     </div>

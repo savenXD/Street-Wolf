@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { defaultTree, labelById, layout } from "@/lib/labels";
 import { fieldByKey, fieldGroups, type ScrapeConfig } from "@/lib/maps-fields";
 import { cn } from "@/lib/utils";
+import { LoadBar } from "@/components/ui/load-bar";
 import { type Campaign, type City, type Domain, useWorkspace } from "@/lib/workspace";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { CsvImport, type ImportMode, type ImportRecord } from "./csv-import";
@@ -44,7 +45,7 @@ export function MapsSheet({ id, domainId, cityId }: { id: string; domainId: stri
     if (ready && account && city && !city.loaded) void loadSheet(id, domainId, cityId);
   }, [ready, account, city, id, domainId, cityId, loadSheet]);
 
-  if (!ready) return null;
+  if (!ready) return <LoadBar />;
   if (!campaign || !domain || !city) {
     return (
       <div className="px-6 py-10">
@@ -53,7 +54,26 @@ export function MapsSheet({ id, domainId, cityId }: { id: string; domainId: stri
       </div>
     );
   }
-  if (account && !city.loaded) return <p className="px-6 py-10 text-sm text-neutral-500">Loading sheet…</p>;
+  // The page frame is real from the first moment; only the leads are placeholders until they arrive.
+  if (account && !city.loaded) {
+    return (
+      <div className="flex w-full flex-1 flex-col px-6 pb-6">
+        <nav className="mt-4 flex flex-wrap items-center gap-1.5 text-sm text-neutral-500">
+          <Link href={`/dashboard/maps/${id}`} className="flex items-center gap-1.5 hover:text-neutral-950">
+            <BrandIcon name="googlemaps" colored className="size-4" /> Google Maps
+          </Link>
+          <ChevronRight className="size-3.5" />
+          <span>{domain.name}</span>
+          <ChevronRight className="size-3.5" />
+          <span className="font-medium text-neutral-950">{city.name}</span>
+        </nav>
+        <h1 className="mt-4 font-brand text-3xl font-bold tracking-[-0.04em] sm:text-4xl">
+          {domain.name} <span className="text-neutral-400">in</span> {city.name}
+        </h1>
+        <LoadBar />
+      </div>
+    );
+  }
   return <SheetView id={id} domainId={domainId} cityId={cityId} campaign={campaign} domain={domain} city={city} />;
 }
 

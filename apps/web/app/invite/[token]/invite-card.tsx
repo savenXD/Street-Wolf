@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type Preview = { campaign: string; inviter: string; email: string; status: string; signedIn: boolean; emailMatches: boolean | null };
+type Preview = { campaign: string; inviter: string; email: string; status: string; signedIn: boolean; emailMatches: boolean | null; signedInAs: string | null };
 
 export function InviteCard({ token }: { token: string }) {
   const router = useRouter();
@@ -14,11 +15,21 @@ export function InviteCard({ token }: { token: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  useEffect(() => {
-    fetch(`/api/invites/${token}`)
+  const load = useCallback(() => {
+    fetch(`/api/invites/${token}`, { cache: "no-store" })
       .then(async (r) => (r.ok ? setP(await r.json()) : setGone(true)))
       .catch(() => setGone(true));
   }, [token]);
+
+  useEffect(load, [load]);
+
+  /** Signs out, then sends them to sign in with the invited address and come straight back here. */
+  async function switchAccount() {
+    setBusy(true);
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = `/signup?next=${encodeURIComponent(`/invite/${token}`)}`;
+  }
 
   async function accept() {
     setBusy(true);
@@ -43,7 +54,17 @@ export function InviteCard({ token }: { token: string }) {
       </>
     );
   }
-  if (!p) return <p className="text-neutral-500">Loading…</p>;
+  if (!p) {
+    // Same shape as the loaded card (heading, two lines, button) so nothing jumps when it arrives.
+    return (
+      <div role="status" aria-label="Loading invite" className="space-y-3">
+        <Skeleton className="h-9 w-3/4" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="mt-6 h-10 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   const next = `/invite/${token}`;
   return (
@@ -58,8 +79,15 @@ export function InviteCard({ token }: { token: string }) {
         <div className="mt-6 space-y-3">
           {p.signedIn ? (
             <>
-              {p.emailMatches === false && <p className="text-sm text-neutral-600">You&apos;re signed in with a different email than the one invited. Sign out and use {p.email}.</p>}
-              <Button className="w-full" onClick={accept} disabled={busy || p.emailMatches === false}>{busy ? "Joining…" : "Accept invite"}</Button>
+              {p.emailMatches === false && <p className="text-sm text-neutral-600">You&apos;re signed in as <b className="text-neutral-950">{p.signedInAs}</b>, but this invite is for {p.email}. Sign out and use the invited address.</p>}
+              {p.emailMatches === false ? (
+                <div className="flex gap-2">
+                  <Button className="flex-1" onClick={switchAccount} disabled={busy}>Switch account</Button>
+                  <Button className="flex-1" variant="outline" onClick={() => { setP(null); load(); }} disabled={busy}>Retry</Button>
+                </div>
+              ) : (
+                <Button className="w-full" onClick={accept} disabled={busy}>{busy ? "Joining…" : "Accept invite"}</Button>
+              )}
             </>
           ) : (
             <Link href={`/signup?next=${encodeURIComponent(next)}`} className="block">

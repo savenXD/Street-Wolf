@@ -2,18 +2,20 @@ import { ArrowRight, Star } from "lucide-react";
 import { BrandIcon } from "@/components/brand-icon";
 import { DotField } from "@/components/landing/dot-field";
 import { Features } from "@/components/landing/features";
-import { Faq } from "@/components/landing/faq";
 import { HeroTitle } from "@/components/landing/hero-title";
 import { Marquee } from "@/components/landing/marquee";
 import { ProductWindow } from "@/components/landing/product-window";
 import { MotionRoot, Reveal } from "@/components/landing/reveal";
 import { SmoothScroll } from "@/components/landing/smooth-scroll";
-import { Terminal } from "@/components/landing/terminal";
-import { ToolsBento } from "@/components/landing/tools-bento";
 import { Logo } from "@/components/logo";
 import { ButtonLink } from "@/components/ui/button";
 import { githubUrl, site } from "@/lib/site";
 import { cacheLife } from "next/cache";
+
+// Sharp downward-pointing teeth along the bottom edge of the nav bar.
+const zigzagTooth = "conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / 20px 10px repeat-x";
+const zigzagBody = "linear-gradient(#000 0 0) top / 100% calc(100% - 9px) no-repeat";
+const zigzag = { mask: `${zigzagTooth}, ${zigzagBody}`, WebkitMask: `${zigzagTooth}, ${zigzagBody}` };
 
 async function getStars(): Promise<number | null> {
   "use cache";
@@ -36,15 +38,12 @@ export default async function Landing() {
       <SmoothScroll />
       <div className="overflow-x-clip bg-white text-neutral-950">
         {/* Nav */}
-        <header className="sticky top-0 z-30 border-b border-neutral-100 bg-white/80 backdrop-blur-lg">
+        {/* The drop-shadow lives on the wrapper because clip-path would cut it off the inner bar. */}
+        <header className="sticky top-0 z-30 drop-shadow-[0_2px_0_rgba(0,0,0,0.08)]">
+          <div className="bg-white/95 pb-2.5" style={zigzag}>
           <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
             <div className="flex items-center gap-8">
               <Logo />
-              <div className="hidden items-center gap-6 text-sm text-neutral-600 md:flex">
-                <a href="#features" className="hover:text-neutral-950">Features</a>
-                <a href="#tools" className="hover:text-neutral-950">Tools</a>
-                <a href="#faq" className="hover:text-neutral-950">FAQ</a>
-              </div>
             </div>
             <div className="flex items-center gap-2">
               <a
@@ -67,6 +66,7 @@ export default async function Landing() {
               </ButtonLink>
             </div>
           </nav>
+          </div>
         </header>
 
         {/* Hero */}
@@ -112,49 +112,6 @@ export default async function Landing() {
 
         <Features />
 
-        {/* Tools */}
-        <section id="tools" className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-          <Reveal>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-5xl">One den. Every channel.</h2>
-            <p className="mt-3 max-w-lg text-neutral-600">
-              Each channel is a plug-in tool. Use what ships, or write your own in an afternoon.
-            </p>
-          </Reveal>
-          <ToolsBento />
-        </section>
-
-        {/* Open source */}
-        <section className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-          <Reveal className="grid items-center gap-10 rounded-[2rem] bg-neutral-950 px-6 py-12 text-white sm:px-12 lg:grid-cols-2">
-            <div>
-              <BrandIcon name="github" className="size-8" />
-              <h2 className="mt-6 text-3xl font-semibold tracking-tight sm:text-4xl">Your data. Your server. Your pack.</h2>
-              <ul className="mt-6 space-y-2 text-neutral-400">
-                <li>MIT licensed, every line on GitHub</li>
-                <li>Self-host in two minutes with Docker</li>
-                <li>No per-lead pricing, ever</li>
-              </ul>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <ButtonLink href="/dashboard" size="lg" className="bg-white text-neutral-950 hover:bg-neutral-200">
-                  Use it free
-                </ButtonLink>
-                <ButtonLink href={githubUrl} target="_blank" rel="noreferrer" size="lg" className="border border-neutral-700 bg-transparent hover:bg-neutral-900">
-                  <Star className="size-4" /> Star on GitHub
-                </ButtonLink>
-              </div>
-            </div>
-            <Terminal />
-          </Reveal>
-        </section>
-
-        {/* FAQ */}
-        <section id="faq" className="px-4 py-14 sm:px-6">
-          <Reveal>
-            <h2 className="text-center text-3xl font-semibold tracking-tight sm:text-5xl">Questions</h2>
-            <Faq />
-          </Reveal>
-        </section>
-
         {/* Final CTA */}
         <section className="relative overflow-hidden border-t border-neutral-100 px-4 py-24 text-center sm:px-6">
           <DotField />
@@ -175,15 +132,21 @@ export default async function Landing() {
         </section>
 
         {/* Footer */}
-        <footer className="border-t border-neutral-100">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-8 text-sm text-neutral-500 sm:px-6">
+        <footer className="relative overflow-hidden border-t border-neutral-100 bg-neutral-50">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 pt-10 text-sm text-neutral-500 sm:px-6">
             <Logo />
-            <div className="flex items-center gap-5">
+            <div className="flex flex-wrap items-center gap-5">
+              <a href="#features" className="hover:text-neutral-950">Features</a>
               <a href={githubUrl} target="_blank" rel="noreferrer" className="hover:text-neutral-950">GitHub</a>
               <a href={`${githubUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer" className="hover:text-neutral-950">License</a>
-              <span>Made by the pack.</span>
             </div>
           </div>
+          <p
+            aria-hidden
+            className="mt-6 select-none whitespace-nowrap text-center text-[15.5vw] font-semibold uppercase leading-[0.8] tracking-tighter text-neutral-200/80 [mask-image:linear-gradient(to_bottom,#000_35%,transparent)]"
+          >
+            Street Wolf
+          </p>
         </footer>
       </div>
     </MotionRoot>
