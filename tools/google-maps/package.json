@@ -8,6 +8,6 @@
   "exports": { ".": "./src/index.ts", "./input": "./src/input.ts" },
   "dependencies": {
     "@street-wolf/tool-sdk": "workspace:*",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   }
 }

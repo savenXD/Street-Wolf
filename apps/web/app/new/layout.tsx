@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/logo";
 import { WorkspaceProvider } from "@/lib/workspace";
 
-export const metadata: Metadata = { title: "New campaign · Street Wolf" };
+export const metadata: Metadata = { title: "New campaign · Street Wolf", robots: { index: false, follow: false } };
 
 export default function NewCampaignLayout({ children }: LayoutProps<"/new">) {
   return (

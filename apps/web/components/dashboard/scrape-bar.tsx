@@ -74,7 +74,7 @@ export function ScrapeBar({ id, domainId, cityId, queries, resetKey = 0 }: { id:
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => void pull(), [pull]);
   useEffect(() => {
-    const t = setInterval(() => document.visibilityState === "visible" && void pull(), active ? 2000 : 15_000);
+    const t = setInterval(() => document.visibilityState === "visible" && void pull(), active ? 2000 : 5000);
     return () => clearInterval(t);
   }, [active, pull]);
 

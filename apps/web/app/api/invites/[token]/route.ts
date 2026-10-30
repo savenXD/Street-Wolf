@@ -1,5 +1,5 @@
 import { col } from "@street-wolf/db";
-import { api, forbidden, ok } from "@/lib/server/http";
+import { api, clientIp, forbidden, ok } from "@/lib/server/http";
 import { acceptInvite, findInviteByToken } from "@/lib/server/invites";
 import { rateLimit } from "@/lib/server/ratelimit";
 import { currentUser, requireBrowserUser } from "@/lib/server/session";
@@ -9,7 +9,7 @@ const mask = (e: string) => e.replace(/^(.).*(@.*)$/, "$1•••$2");
 
 /** Public preview for the /invite/[token] page: enough to say who invited you, not enough to leak anything. */
 export const GET = api<{ token: string }>(async (req, { token }) => {
-  await rateLimit("invite-peek", req.headers.get("x-forwarded-for") ?? "unknown", 60, 900);
+  await rateLimit("invite-peek", clientIp(req) ?? "unknown", 60, 900);
   const inv = await findInviteByToken(token);
   const [c, inviter, me] = await Promise.all([(await col("campaigns")).findOne({ _id: inv.campaignId }), (await col("users")).findOne({ _id: inv.invitedBy }), currentUser(req)]);
   return ok({

@@ -1,6 +1,6 @@
 import "server-only";
 import { col, type Campaign, type Invite, type Role, type User } from "@street-wolf/db";
-import { newId, newToken, sha256 } from "./crypto";
+import { newId, newToken, seal, sha256, unseal } from "./crypto";
 import { env } from "./env";
 import { conflict, notFound } from "./http";
 import { enqueueEmail, templates } from "./mail";
@@ -20,9 +20,10 @@ export async function createInvite(p: { campaign: Campaign; inviter: User; email
 
   const token = newToken();
   const now = new Date();
-  const fields = { tokenHash: sha256(token), token, invitedBy: p.inviter._id, role: p.role, createdAt: now, expiresAt: new Date(now.getTime() + INVITE_DAYS * 86400_000) };
+  const enc = seal(token);
+  const fields = { tokenHash: sha256(token), ...(enc ? { tokenEnc: enc } : {}), invitedBy: p.inviter._id, role: p.role, createdAt: now, expiresAt: new Date(now.getTime() + INVITE_DAYS * 86400_000) };
   // One open invite per person: re-inviting refreshes the link instead of creating a second row.
-  const before = await invites.findOneAndUpdate({ campaignId: p.campaign._id, email: p.email, status: "pending" }, { $set: fields }, { returnDocument: "before" });
+  const before = await invites.findOneAndUpdate({ campaignId: p.campaign._id, email: p.email, status: "pending" }, { $set: fields, $unset: { token: "", ...(enc ? {} : { tokenEnc: "" }) } }, { returnDocument: "before" });
   let id = before?._id;
   if (!before) {
     id = newId();
@@ -47,7 +48,7 @@ export async function acceptInvite(invite: Invite, user: User) {
     { $setOnInsert: { _id: newId(), campaignId: invite.campaignId, userId: user._id, role: invite.role, addedBy: invite.invitedBy, createdAt: new Date() } },
     { upsert: true },
   );
-  const flipped = await invites.updateOne({ _id: invite._id, status: "pending" }, { $set: { status: "accepted", acceptedBy: user._id, acceptedAt: new Date() }, $unset: { token: "" } });
+  const flipped = await invites.updateOne({ _id: invite._id, status: "pending" }, { $set: { status: "accepted", acceptedBy: user._id, acceptedAt: new Date() }, $unset: { token: "", tokenEnc: "" } });
   if (flipped.modifiedCount) {
     const campaign = await (await col("campaigns")).findOne({ _id: invite.campaignId });
     const who = user.name || user.email;
@@ -82,4 +83,19 @@ export async function findInviteByToken(token: string) {
   const inv = await (await col("invites")).findOne({ tokenHash: sha256(token) });
   if (!inv || inv.status === "revoked") throw notFound("This invite isn't valid any more");
   return inv;
+}
+
+/** The copyable link for an open invite, or null when it can't be recovered (no key configured, or an old row). */
+export function linkFor(i: Pick<Invite, "tokenEnc" | "token">) {
+  const token = i.tokenEnc ? unseal(i.tokenEnc) : (i.token ?? null);
+  return token ? inviteUrl(token) : null;
+}
+
+/** One-time clean-up of invites stored before links were encrypted: seal them, or drop the copy if there is no key. */
+export async function sealLegacyInviteTokens() {
+  const invites = await col("invites");
+  for await (const i of invites.find({ token: { $exists: true } })) {
+    const enc = i.token ? seal(i.token) : null;
+    await invites.updateOne({ _id: i._id }, { $unset: { token: "" }, ...(enc ? { $set: { tokenEnc: enc } } : {}) });
+  }
 }

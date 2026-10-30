@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { ArrowRight } from "lucide-react";
 import { BrandGlyph, tileStyles } from "@/components/landing/brand-tile";
 import { FeaturesPipeline } from "@/components/landing/features-pipeline";
+import { Promises } from "@/components/landing/promises";
 import { Reveal } from "@/components/landing/reveal";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -157,10 +158,12 @@ export function Features() {
     <section id="features" ref={root} className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
       <Reveal className="text-center">
         <p className="text-xs font-medium tracking-widest text-neutral-400 uppercase">What it does</p>
-        <h2 className="mt-3 text-5xl font-semibold tracking-tighter sm:text-7xl">Current features</h2>
+        <h2 className="mt-3 text-5xl font-semibold tracking-tighter sm:text-7xl">Runs up to 24 hours a day</h2>
       </Reveal>
 
       <FeaturesPipeline />
+
+      <Promises />
 
       <div className="fx-rows relative mt-24">
         <div aria-hidden className="absolute top-0 bottom-0 left-1/2 hidden w-px -translate-x-1/2 bg-neutral-200 md:block">

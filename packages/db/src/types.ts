@@ -86,7 +86,9 @@ export type Invite = {
   email: string;
   role: Exclude<Role, "owner">;
   tokenHash: string;
-  /** The share link's secret, kept so admins can copy it again while the invite is open. Dropped when the invite closes. */
+  /** The share link's secret, encrypted (AES-GCM, key from APP_SECRET), kept so admins can copy it again while the invite is open. Dropped when the invite closes. */
+  tokenEnc?: string;
+  /** Legacy plaintext copy of the above; migrated away on boot. */
   token?: string;
   invitedBy: string;
   status: InviteStatus;
@@ -131,6 +133,8 @@ export type Lead = {
   source: Platform | "manual" | "import";
   sourceId: string | null; // platform id used to dedupe re-scrapes
   updatedBy: string | null;
+  /** Cell keys a person typed or cleared by hand. A re-scrape never overwrites these. */
+  edited?: string[];
   /** Who first made this row a real outreach (any label but "Didn't pick"), and the day it was credited to them. */
   outreachedBy?: string;
   outreachedAt?: Date;

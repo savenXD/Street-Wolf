@@ -26,8 +26,15 @@ export const POST = api(async (req) => {
   const t = await (await col("authTokens")).findOneAndUpdate({ _id: sha256(token), usedAt: null, expiresAt: { $gt: new Date() } }, { $set: { usedAt: new Date() } });
   if (!t) throw new HttpError(400, "This sign-in link has expired or was already used. Request a new one.", "bad_link");
 
-  const user = await upsertUser({ email: t.email });
-  const { token: session, maxAge } = await createSession(user._id, req);
+  let user, session, maxAge;
+  try {
+    user = await upsertUser({ email: t.email });
+    ({ token: session, maxAge } = await createSession(user._id, req));
+  } catch (e) {
+    // The link was spent but nobody got signed in (database hiccup): hand it back so the person can simply click it again.
+    await (await col("authTokens")).updateOne({ _id: sha256(token), usedAt: { $ne: null } }, { $set: { usedAt: null } }).catch(() => undefined);
+    throw e;
+  }
   const res = ok({ next: safeNext(t.next) });
   res.cookies.set(COOKIE, session, cookieOptions(maxAge));
   return res;

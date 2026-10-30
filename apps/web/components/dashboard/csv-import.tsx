@@ -16,6 +16,8 @@ export function CsvImport({
   data,
   targets,
   existing,
+  canReplace,
+  teammates,
   onClose,
   onImport,
 }: {
@@ -23,11 +25,16 @@ export function CsvImport({
   data: string[][];
   targets: Target[];
   existing: number;
+  /** Replacing wipes the sheet for the whole team, so only admins and owners may. */
+  canReplace: boolean;
+  /** Other people on the campaign who will lose those leads too. */
+  teammates: number;
   onClose: () => void;
   onImport: (records: ImportRecord[], mode: ImportMode) => void;
 }) {
   const [header, setHeader] = useState(true);
   const [mode, setMode] = useState<ImportMode>("add");
+  const [sure, setSure] = useState(false);
   const width = Math.max(...data.map((r) => r.length));
 
   // Match each CSV column to a sheet column by header name; every target is used at most once.
@@ -49,7 +56,7 @@ export function CsvImport({
     const records: ImportRecord[] = body.map((cells) => {
       const rec: ImportRecord = { values: {} };
       map.forEach((key, i) => {
-        const v = (cells[i] ?? "").trim();
+        const v = (cells[i] ?? "").trim().slice(0, 5000); // the server's cell limit
         if (!key || !v) return;
         if (key === "label") rec.label = v;
         else rec.values[key] = v;
@@ -97,11 +104,11 @@ export function CsvImport({
           <div className="grid gap-2 sm:grid-cols-2">
             {([
               ["add", "Add to existing", `Keep your ${existing} current ${existing === 1 ? "lead" : "leads"} and put these after them.`],
-              ["replace", "Replace existing", `Remove the ${existing} current ${existing === 1 ? "lead" : "leads"} and use only these. You can undo it with Ctrl+Z.`],
+              ...(canReplace ? [["replace", "Replace existing", `Remove the ${existing} current ${existing === 1 ? "lead" : "leads"}, with their labels, and use only these.`] as const] : []),
             ] as const).map(([v, title, hint]) => (
               <button
                 key={v}
-                onClick={() => setMode(v)}
+                onClick={() => (setMode(v), setSure(false))}
                 role="radio"
                 aria-checked={mode === v}
                 className={cn("rounded-xl border p-3 text-left transition-colors", mode === v ? "border-neutral-950 bg-neutral-50" : "border-neutral-200 hover:border-neutral-400")}
@@ -118,9 +125,18 @@ export function CsvImport({
           </div>
         </div>
 
+        {mode === "replace" && existing > 0 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} className="mt-0.5 size-4 accent-red-600" />
+            <span>
+              I understand this deletes all {existing} current {existing === 1 ? "lead" : "leads"} and their labels{teammates > 0 ? `, for everyone on this campaign (${teammates} other ${teammates === 1 ? "person" : "people"})` : ""}. Undo (Ctrl+Z) only works on this screen until you leave it.
+            </span>
+          </label>
+        )}
+
         <div className="flex items-center justify-end gap-2 border-t border-neutral-100 pt-4">
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={!mapped || !body.length} onClick={run}>
+          <Button size="sm" disabled={!mapped || !body.length || (mode === "replace" && existing > 0 && !sure)} onClick={run}>
             Import {body.length} {body.length === 1 ? "lead" : "leads"}
           </Button>
         </div>

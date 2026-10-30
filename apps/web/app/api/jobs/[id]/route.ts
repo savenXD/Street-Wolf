@@ -13,9 +13,16 @@ export const PATCH = api<{ id: string }>(async (req, { id }) => {
   const job = await jobs.findOne({ _id: id });
   if (!job) throw notFound("Job not found");
   const claimant = user.viaToken ?? user._id;
-  if (job.createdBy !== user._id || (user.viaToken && job.claimedBy !== claimant)) throw forbidden("That job isn't yours");
-  await requireRole(job.campaignId, user._id);
   const b = await body(req, Patch);
+  const mine = job.createdBy === user._id && (!user.viaToken || job.claimedBy === claimant);
+  if (!mine) {
+    // A campaign admin can stop anybody's job from the dashboard (a teammate left, or their scraper is off). Nothing else.
+    const stopOnly = !user.viaToken && b.status === "cancelled" && Object.keys(b).length === 1;
+    if (!stopOnly) throw forbidden("That job isn't yours");
+    await requireRole(job.campaignId, user._id, "admin");
+  } else {
+    await requireRole(job.campaignId, user._id);
+  }
   // Once a job has ended (or been stopped from the dashboard) nothing can revive it; the worker just learns the status.
   if (job.status === "done" || job.status === "failed" || job.status === "cancelled") return ok({ ok: true, status: job.status });
   // Only the browser may cancel a job that hasn't been claimed; a token may only touch jobs it claimed (checked above).

@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Logo } from "@/components/logo";
 import { InviteCard } from "./invite-card";
+
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 async function Body({ params }: Pick<PageProps<"/invite/[token]">, "params">) {
   const { token } = await params;

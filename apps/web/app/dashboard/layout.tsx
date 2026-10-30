@@ -4,7 +4,7 @@ import { Shell } from "@/components/dashboard/shell";
 import { LoadBar } from "@/components/ui/load-bar";
 import { WorkspaceProvider } from "@/lib/workspace";
 
-export const metadata: Metadata = { title: "Dashboard · Street Wolf" };
+export const metadata: Metadata = { title: "Dashboard · Street Wolf", robots: { index: false, follow: false } };
 
 export default function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
   return (

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { LabelNode } from "@/lib/labels";
 import { clearToday, setToday } from "@/lib/presence";
 import type { ScrapeConfig } from "@/lib/maps-fields";
+import { type Change, diffRow, EMPTY, isEmpty, mergeRows, type Row, sameRow, type SheetBase } from "@/lib/sheet-merge";
 
 /**
  * The client store. The server (MongoDB) is the source of truth: edits update the screen immediately, then sync in the
@@ -161,7 +162,20 @@ export function useWorkspace() {
   return ctx;
 }
 
-type SheetSync = { cid: string; did: string; cursor: number; baseRows: string[]; baseLabels: Record<string, string>; timer?: ReturnType<typeof setTimeout>; sending?: boolean; again?: boolean };
+/**
+ * `baseRows` / `baseLabels` are what the server is known to hold. The difference between them and the screen is exactly what this
+ * person changed and hasn't saved, so a save sends only that (never a whole row), and a teammate's change is merged key by key.
+ */
+type SheetSync = SheetBase & {
+  cid: string; did: string; cursor: number;
+  timer?: ReturnType<typeof setTimeout>; retry?: ReturnType<typeof setTimeout>; fails: number;
+  sending?: boolean; again?: boolean; syncing?: Promise<ScrapeJob | null>;
+};
+
+/** Rows the server rejects as invalid (400/413) are set aside one by one instead of blocking every later save. */
+const permanent = (e: unknown) => e instanceof ApiError && (e.status === 400 || e.status === 413);
+/** No point retrying: the person lost access, or the sheet is gone. */
+const gone = (e: unknown) => e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404);
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [local, setLocal] = useState<Local>(empty);
@@ -211,7 +225,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [applyBoot]);
 
-  refreshRef.current = refresh;
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   /** Run a server write. On failure, reload the server's version (the optimistic change disappears) and say why. */
   const sync = useCallback(
@@ -259,49 +275,140 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   // ── Sheet sync ───────────────────────────────────────────────────────────
   const findCity = (pid: string) => latest.current.campaigns.flatMap((c) => c.domains.flatMap((d) => d.cities)).find((c) => c.id === pid);
 
+  /** Replaces one sheet in the store (rows and labels live per sheet). */
+  const editCity = useCallback(
+    (pid: string, fn: (c: City) => City) =>
+      mutate((l) => ({ ...l, campaigns: l.campaigns.map((c) => ({ ...c, domains: c.domains.map((d) => (d.cities.some((x) => x.id === pid) ? { ...d, cities: d.cities.map((x) => (x.id === pid ? fn(x) : x)) } : d)) })) })),
+    [mutate],
+  );
+
+  /**
+   * The server put these new rows on other row numbers because a scrape or a teammate had just taken theirs. Their data follows
+   * it; the row they typed into shows what is really there (it arrives with the next live sync).
+   */
+  const placeMoved = useCallback((pid: string, sh: SheetSync, sent: Change[], moved: { from: number; to: number }[]) => {
+    editCity(pid, (c) => {
+      const rows = [...(c.rows ?? [])];
+      const labels = { ...(c.labels ?? {}) };
+      for (const m of moved) {
+        const ch = sent.find((x) => x.row === m.from);
+        while (rows.length <= m.to) rows.push({});
+        rows[m.to] = rows[m.from] ?? {};
+        rows[m.from] = {};
+        if (labels[m.from]) {
+          labels[m.to] = labels[m.from];
+          delete labels[m.from];
+        }
+        sh.baseRows[m.to] = { ...(ch?.set ?? {}) };
+        if (ch?.label) sh.baseLabels[m.to] = ch.label;
+        sh.baseRows[m.from] = EMPTY;
+        delete sh.baseLabels[m.from];
+      }
+      sh.cursor = Math.min(sh.cursor, Date.now() - 60_000); // fetch what really sits on the old row numbers
+      return { ...c, rows, labels, syncTick: (c.syncTick ?? 0) + 1 };
+    });
+  }, [editCity]);
+
+  const flushRef = useRef<((pid: string) => Promise<void>) | null>(null);
   const flushSheet = useCallback(async (pid: string, keepalive = false) => {
     const sh = sheets.current.get(pid);
     const city = findCity(pid);
     if (!sh || !city) return;
     clearTimeout(sh.timer);
+    clearTimeout(sh.retry);
     if (sh.sending) {
       sh.again = true;
       return;
     }
     const rows = city.rows ?? [];
     const labels = city.labels ?? {};
-    const len = Math.max(rows.length, sh.baseRows.length, ...Object.keys(labels).map((k) => +k + 1), ...Object.keys(sh.baseLabels).map((k) => +k + 1));
-    const changes: { row: number; cells: Record<string, string>; label: string | null }[] = [];
-    const snapshot: string[] = [];
+    let len = Math.max(rows.length, sh.baseRows.length);
+    for (const k of Object.keys(labels)) len = Math.max(len, +k + 1);
+    for (const k of Object.keys(sh.baseLabels)) len = Math.max(len, +k + 1);
+    // Only what this person changed, cell by cell. A row they never touched is never sent, and a row they edited sends just
+    // the edited cells, so a screen that is behind a teammate's work can't put old values back.
+    const changes: Change[] = [];
     for (let i = 0; i < len; i++) {
-      const json = JSON.stringify(rows[i] ?? {});
-      snapshot[i] = json;
-      const label = labels[String(i)] ?? null;
-      if (json !== (sh.baseRows[i] ?? "{}") || label !== (sh.baseLabels[String(i)] ?? null)) changes.push({ row: i, cells: rows[i] ?? {}, label });
+      const cur = rows[i] ?? EMPTY;
+      const base = sh.baseRows[i] ?? EMPTY;
+      const label = labels[i] ?? null;
+      const baseLabel = sh.baseLabels[i] ?? null;
+      const d = cur === base ? {} : diffRow(cur, base);
+      const labelChanged = label !== baseLabel;
+      if (!d.set && !d.unset && !labelChanged) continue;
+      changes.push({ row: i, ...d, ...(labelChanged ? { label } : {}), ...(isEmpty(base) && baseLabel === null && (d.set || (labelChanged && label !== null)) ? { isNew: true } : {}) });
     }
     if (!changes.length) {
+      sh.fails = 0;
       setSaveState(pid, "saved");
       return;
     }
     sh.sending = true;
     setSaveState(pid, "saving");
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const url = `/api/campaigns/${sh.cid}/domains/${sh.did}/places/${pid}/sheet`;
+    type Resp = { today: number | null; moved?: { from: number; to: number }[] };
+    const rejected: Change[] = [];
+    const post = (chunk: Change[]) => call<Resp>("PATCH", url, { changes: chunk, tz }, keepalive && chunk.length < 100);
+    // A chunk the server refuses as invalid is split until the offending row is found; everything else still saves.
+    const send = async (chunk: Change[]): Promise<{ chunk: Change[]; r: Resp }[]> => {
+      try {
+        return [{ chunk, r: await post(chunk) }];
+      } catch (e) {
+        if (!permanent(e)) throw e;
+        if (chunk.length === 1) {
+          rejected.push(chunk[0]);
+          return [];
+        }
+        const mid = chunk.length >> 1;
+        return [...(await send(chunk.slice(0, mid))), ...(await send(chunk.slice(mid)))];
+      }
+    };
     try {
       for (let i = 0; i < changes.length; i += 2000) {
-        const chunk = changes.slice(i, i + 2000);
-        const r = await call<{ today: number | null }>("PATCH", `/api/campaigns/${sh.cid}/domains/${sh.did}/places/${pid}/sheet`, { changes: chunk, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }, keepalive && chunk.length < 100);
-        // Outreach moved: show today's number right away and pull fresh chart data (throttled).
-        if (r?.today != null && accountRef.current) {
-          setToday(sh.cid, accountRef.current.id, r.today);
-          if (Date.now() - lastRefresh.current > 10_000) void refreshRef.current();
+        for (const { chunk, r } of await send(changes.slice(i, i + 2000))) {
+          // Each chunk moves the baseline as soon as it is safely on the server, so a later failure can't make it be sent twice.
+          for (const ch of chunk) {
+            sh.baseRows[ch.row] = rows[ch.row] ?? EMPTY;
+            if (ch.label !== undefined) {
+              if (ch.label) sh.baseLabels[ch.row] = ch.label;
+              else delete sh.baseLabels[ch.row];
+            }
+          }
+          if (r.moved?.length) placeMoved(pid, sh, chunk, r.moved);
+          // Outreach moved: show today's number right away and pull fresh chart data (throttled).
+          if (r?.today != null && accountRef.current) {
+            setToday(sh.cid, accountRef.current.id, r.today);
+            if (Date.now() - lastRefresh.current > 10_000) void refreshRef.current();
+          }
         }
       }
-      // Only the rows that were sent move the baseline, so rows a live scrape merged in meanwhile aren't disturbed.
-      for (const ch of changes) sh.baseRows[ch.row] = snapshot[ch.row];
-      sh.baseLabels = { ...labels };
+      sh.fails = 0;
+      if (rejected.length) {
+        // These rows can never be saved as typed (for example a cell over 5,000 characters). They go back to what the server has.
+        editCity(pid, (c) => {
+          const nr = [...(c.rows ?? [])];
+          const nl = { ...(c.labels ?? {}) };
+          for (const ch of rejected) {
+            nr[ch.row] = sh.baseRows[ch.row] ?? EMPTY;
+            const bl = sh.baseLabels[ch.row];
+            if (bl) nl[ch.row] = bl;
+            else delete nl[ch.row];
+          }
+          return { ...c, rows: nr, labels: nl, syncTick: (c.syncTick ?? 0) + 1 };
+        });
+        setError(`${rejected.length === 1 ? "One row" : `${rejected.length} rows`} couldn't be saved and went back to the last saved version. A cell can hold up to 5,000 characters.`);
+      }
       if (!sh.again) setSaveState(pid, "saved");
     } catch (e) {
       setSaveState(pid, "error");
-      setError(e instanceof Error ? `Couldn't save the sheet: ${e.message}` : "Couldn't save the sheet");
+      if (gone(e)) {
+        // Removed from the campaign (or the sheet was deleted) while working: say so once and let the workspace drop it.
+        setError("You no longer have access to this sheet, so your latest edits weren't saved.");
+        void refreshRef.current();
+      } else if (sh.fails++ === 0) setError(e instanceof Error ? `Couldn't save the sheet: ${e.message}` : "Couldn't save the sheet");
+      // Network blips, a busy server or a rate limit heal themselves: keep trying with a growing pause.
+      if (!gone(e)) sh.retry = setTimeout(() => flushRef.current?.(pid), Math.min(30_000, 1500 * 2 ** Math.min(sh.fails - 1, 5)));
     } finally {
       sh.sending = false;
       if (sh.again) {
@@ -309,7 +416,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         void flushSheet(pid);
       }
     }
-  }, []);
+  }, [editCity, placeMoved]);
+  useEffect(() => {
+    flushRef.current = flushSheet;
+  }, [flushSheet]);
 
   const scheduleSheet = useCallback(
     (pid: string) => {
@@ -340,7 +450,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       loading.current.add(pid);
       try {
         const s = await call<{ rows: Record<string, string>[]; labels: Record<string, string>; stats: Counts; cursor: number }>("GET", `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`);
-        sheets.current.set(pid, { cid, did, cursor: s.cursor, baseRows: s.rows.map((r) => JSON.stringify(r)), baseLabels: { ...s.labels } });
+        sheets.current.set(pid, { cid, did, cursor: s.cursor, baseRows: s.rows.slice(), baseLabels: { ...s.labels }, fails: 0 });
         mutate((l) => ({
           ...l,
           campaigns: l.campaigns.map((c) => (c.id !== cid ? c : { ...c, domains: c.domains.map((d) => (d.id !== did ? d : { ...d, cities: d.cities.map((city) => (city.id !== pid ? city : { ...city, rows: s.rows, labels: s.labels, stats: s.stats, loaded: true })) })) })),
@@ -354,42 +464,56 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [mutate],
   );
 
-  /** Rows saved by the scraper (or a teammate) arrive here. Rows with an unsaved local edit are left alone: the person's typing wins. */
+  /**
+   * Rows and labels saved by the scraper or a teammate arrive here, for every open sheet. They are merged cell by cell: what the
+   * person has typed and not yet saved stays theirs, everything else takes the server's value. Returns the newest job for the sheet.
+   */
   const syncSheet = useCallback<Workspace["syncSheet"]>(
-    async (cid, did, pid) => {
+    (cid, did, pid) => {
       const sh = sheets.current.get(pid);
-      if (!accountRef.current || !sh) return null;
-      let job: ScrapeJob | null = null;
-      for (let guard = 0; guard < 50; guard++) {
-        const r = await call<{ job: ScrapeJob | null; rows: { row: number; cells: Record<string, string> }[]; more: boolean; cursor: number; now: number; stats: Counts }>(
-          "GET",
-          `/api/campaigns/${cid}/domains/${did}/places/${pid}/sync?since=${Math.max(0, sh.cursor - 3000)}`,
-        );
-        if (r.rows.length) {
-          mutate((l) => ({
+      if (!accountRef.current || !sh) return Promise.resolve(null);
+      if (sh.syncing) return sh.syncing; // one poll at a time per sheet, however many places ask
+      type Page = { job: ScrapeJob | null; rows: { row: number; cells: Row; label: string | null }[]; more: boolean; cursor: { at: number; row: number } | null; now: number; stats: Counts };
+      const run = async () => {
+        let job: ScrapeJob | null = null;
+        let since = Math.max(0, sh.cursor - 3000);
+        let afterRow: number | null = null;
+        for (let guard = 0; guard < 50; guard++) {
+          const r: Page = await call<Page>(
+            "GET",
+            `/api/campaigns/${cid}/domains/${did}/places/${pid}/sync?since=${since}${afterRow !== null ? `&afterRow=${afterRow}` : ""}`,
+          );
+          job = r.job;
+          // While a save is in flight the server may already hold rows the browser hasn't been told about; merging now could
+          // mistake the person's own new row for somebody else's. Try again on the next poll.
+          if (sh.sending) return job;
+          // Nothing new and the counters are the same: leave the store alone (a state update re-renders the whole app).
+          const known = findCity(pid)?.stats;
+          const unchanged = !r.rows.length && !!known && known.leads === r.stats.leads && known.outreached === r.stats.outreached && known.converted === r.stats.converted;
+          if (!unchanged) mutate((l) => ({
             ...l,
             campaigns: l.campaigns.map((c) =>
               c.id !== cid ? c : { ...c, domains: c.domains.map((d) => d.id !== did ? d : { ...d, cities: d.cities.map((city) => {
                 if (city.id !== pid) return city;
-                const rows = [...(city.rows ?? [])];
-                for (const x of r.rows) {
-                  const cur = JSON.stringify(rows[x.row] ?? {});
-                  if (cur !== (sh.baseRows[x.row] ?? "{}")) continue; // unsaved local edit wins
-                  while (rows.length <= x.row) rows.push({});
-                  rows[x.row] = x.cells;
-                  sh.baseRows[x.row] = JSON.stringify(x.cells);
-                }
-                return { ...city, rows, stats: r.stats, syncTick: (city.syncTick ?? 0) + 1 };
+                if (!r.rows.length) return { ...city, stats: r.stats };
+                const m = mergeRows(sh, city, r.rows);
+                // Only a real change from outside drops the undo history; the echo of the person's own save does not.
+                return { ...city, rows: m.rows, labels: m.labels, stats: r.stats, ...(m.changed ? { syncTick: (city.syncTick ?? 0) + 1 } : {}) };
               }) }) }
             ),
           }));
+          if (!r.more || !r.cursor) {
+            sh.cursor = r.now;
+            break;
+          }
+          since = r.cursor.at; // a big backlog: keep pulling, paged by (time, row), until we've caught up
+          afterRow = r.cursor.row;
         }
-        sh.cursor = r.more ? r.cursor : r.now;
-        job = r.job;
-        if (!r.more) break; // otherwise a big backlog: keep pulling until we've caught up
-        if (!r.rows.length) mutate((l) => ({ ...l, campaigns: l.campaigns.map((c) => c.id !== cid ? c : { ...c, domains: c.domains.map((d) => d.id !== did ? d : { ...d, cities: d.cities.map((city) => city.id !== pid ? city : { ...city, stats: r.stats }) }) }) }));
-      }
-      return job;
+        return job;
+      };
+      return (sh.syncing = run().finally(() => {
+        sh.syncing = undefined;
+      }));
     },
     [mutate],
   );
@@ -501,12 +625,17 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           }),
         );
         if (added) {
-          sheets.current.set(id, { cid, did, cursor: Date.now(), baseRows: [], baseLabels: {} });
+          sheets.current.set(id, { cid, did, cursor: Date.now(), baseRows: [], baseLabels: {}, fails: 0 });
           api(call("POST", `/api/campaigns/${cid}/domains/${did}/places`, { id, name }));
         }
       },
       removeCity: (cid, did, city) => {
         editDomains(cid, (ds) => ds.map((d) => (d.id === did ? { ...d, cities: d.cities.filter((c) => c.id !== city) } : d)));
+        const gone = sheets.current.get(city);
+        if (gone) {
+          clearTimeout(gone.timer);
+          clearTimeout(gone.retry);
+        }
         sheets.current.delete(city);
         api(call("DELETE", `/api/campaigns/${cid}/domains/${did}/places/${city}`));
       },
@@ -527,7 +656,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
                 const rows = ct.rows.map((row, i) => {
                   const next = strip(row);
                   // A row with no unsaved edits stays "clean" so the cleanup isn't sent back to the server as a change.
-                  if (sh && JSON.stringify(row) === (sh.baseRows[i] ?? "{}")) sh.baseRows[i] = JSON.stringify(next);
+                  if (sh && sameRow(row, sh.baseRows[i])) sh.baseRows[i] = next;
                   return next;
                 });
                 return { ...ct, rows, stats: r.stats ?? ct.stats, syncTick: (ct.syncTick ?? 0) + 1 };

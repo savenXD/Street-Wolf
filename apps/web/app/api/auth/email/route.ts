@@ -13,7 +13,10 @@ export const POST = api(async (req) => {
   const { email: to, next } = await body(req, Body);
   const ip = clientIp(req) ?? "unknown";
   await rateLimit("auth-email-ip", ip, 20, 3600);
-  await rateLimit("auth-email-addr", to, 5, 900);
+  // Per (address, caller): a stranger spamming someone's address can't use up that person's own attempts. A higher cap per address
+  // alone still stops the endpoint being used to flood an inbox from many addresses.
+  await rateLimit("auth-email-addr", `${to}|${ip}`, 5, 900);
+  await rateLimit("auth-email-flood", to, 30, 3600);
 
   const token = newToken();
   await (await col("authTokens")).insertOne({

@@ -20,6 +20,8 @@ After the first deploy you get the live address. Use it everywhere below.
 | `NEXT_PUBLIC_SITE_URL` | `https://YOUR-DOMAIN` (no trailing slash). Used in emailed links and the Google redirect. **Redeploy after changing it** (it's baked in at build time). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From Google Cloud (section 4) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | From Resend (section 5) |
+| `APP_SECRET` | Optional but recommended: a long random string (`openssl rand -base64 36`) that encrypts invite links stored for admins to re-copy. Falls back to `CRON_SECRET`; with neither, links are not kept and "copy link" is unavailable (the email still works). |
+| `TRUSTED_PROXY_HOPS` | How many proxies in front of the app append to `x-forwarded-for` (default `1`; Vercel: `1`). Rate limits use the address that many entries from the right, so a client can't dodge them by inventing one. |
 | `CRON_SECRET` | A long random string (`openssl rand -base64 36`). Use a **different** one from local. |
 | `NEXT_PUBLIC_GITHUB_REPO`, `NEXT_PUBLIC_SELF_HOSTED` | Optional. Set `NEXT_PUBLIC_SELF_HOSTED=false` on the public site. |
 

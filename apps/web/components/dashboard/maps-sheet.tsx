@@ -3,12 +3,13 @@
 import { ChevronRight, Download, GripVertical, Upload, SlidersHorizontal, Tags } from "lucide-react";
 import Link from "next/link";
 import { AnimatePresence } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BrandIcon } from "@/components/brand-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { defaultTree, labelById, layout } from "@/lib/labels";
 import { fieldByKey, fieldGroups, type ScrapeConfig } from "@/lib/maps-fields";
+import { nonOutreachIds } from "@/lib/outreach";
 import { cn } from "@/lib/utils";
 import { LoadBar } from "@/components/ui/load-bar";
 import { type Campaign, type City, type Domain, useWorkspace } from "@/lib/workspace";
@@ -21,6 +22,13 @@ import { ScrapeBar } from "./scrape-bar";
 import { ScrapeDrawer } from "./scrape-drawer";
 
 const MIN_ROWS = 40;
+/** The server's limits (apps/web/lib/server/sheets.ts, the sheet route): longer cells or later rows are refused. */
+const MAX_CELL = 5000;
+const MAX_ROW = 199_999;
+/** Only the rows on screen (plus a margin) are in the page; a 1,500-row sheet is ~60 rows of DOM, not 1,500. */
+const OVERSCAN = 12;
+const ROW_H = 36;
+const HEAD_H = 72;
 const ROW_NUM_W = 48;
 const MIN_W = 64;
 const blankKeys = ["c1", "c2", "c3", "c4", "c5"];
@@ -78,7 +86,7 @@ export function MapsSheet({ id, domainId, cityId }: { id: string; domainId: stri
 }
 
 function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: string; domainId: string; cityId: string; campaign: Campaign; domain: Domain; city: City }) {
-  const { setScrape, setSheet, setLabelTree } = useWorkspace();
+  const { setScrape, setSheet, setLabelTree, syncSheet } = useWorkspace();
   const [editingLabels, setEditingLabels] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [setupKey, setSetupKey] = useState(0);
@@ -101,6 +109,23 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const keyNav = useRef(false);
   const undo = useRef<Snap[]>([]);
   const redo = useRef<Snap[]>([]);
+  // Virtual scrolling: what part of the sheet is on screen, and the real height of a row and of the header (measured, not assumed).
+  const [view, setView] = useState({ top: 0, h: 900 });
+  const [rowH, setRowH] = useState(ROW_H);
+  const [headH, setHeadH] = useState(HEAD_H);
+  const frame = useRef(0);
+
+  // Teammates' edits and labels reach this sheet every few seconds. (With a scrape set up, the scrape bar does the polling, faster while it runs.)
+  const hasScrape = !!city.scrape;
+  useEffect(() => {
+    const pull = () => document.visibilityState === "visible" && void syncSheet(id, domainId, cityId).catch(() => undefined);
+    const t = hasScrape ? undefined : setInterval(pull, 5000);
+    document.addEventListener("visibilitychange", pull);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", pull);
+    };
+  }, [hasScrape, syncSheet, id, domainId, cityId]);
 
   // Rows pushed in by a live scrape would be wiped by an old undo snapshot, so history restarts when they arrive.
   useEffect(() => {
@@ -115,11 +140,16 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const keys = [...saved.filter((k) => base.includes(k)), ...base.filter((k) => !saved.includes(k))];
   const cols = [{ key: "label", label: "Label" }, ...keys.map((k) => ({ key: k, label: cfg ? (fieldByKey(k)?.label ?? k) : "" }))];
   const colCount = cols.length;
-  const rows = city.rows ?? [];
-  const labels = city.labels ?? {};
+  const rows = useMemo(() => city.rows ?? [], [city.rows]);
+  const labels = useMemo(() => city.labels ?? {}, [city.labels]);
   const tree = campaign.labelTree ?? defaultTree;
   const total = Math.max(MIN_ROWS, rows.length + 5);
-  const leadCount = rows.filter((r) => Object.keys(r).length > 0).length;
+  const leadCount = useMemo(() => rows.reduce((n, r) => n + (Object.keys(r).length > 0 ? 1 : 0), 0), [rows]);
+  // Same rule as the server: any label except "Didn't pick" is outreach. Counted from the labels on screen, so it moves as you work.
+  const outreached = useMemo(() => {
+    const skip = nonOutreachIds(tree);
+    return Object.values(labels).reduce((n, l) => n + (skip.has(l) ? 0 : 1), 0);
+  }, [labels, tree]);
   const widthOf = (k: string) => (resize?.key === k ? resize.w : (city.view?.widths?.[k] ?? (k === "label" ? 224 : 176)));
   const tableW = ROW_NUM_W + cols.reduce((n, c) => n + widthOf(c.key), 0);
 
@@ -152,10 +182,16 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
 
   /** Rows with the given cells set ("" clears), trailing empty rows trimmed. */
   const withCells = (edits: { r: number; key: string; v: string }[]) => {
-    const next = rows.map((x) => ({ ...x }));
+    const next = rows.slice();
+    const copied = new Set<number>(); // only the rows that change are copied; the rest keep their identity
     for (const e of edits) {
+      if (e.r > MAX_ROW) continue;
       while (next.length <= e.r) next.push({});
-      if (e.v) next[e.r][e.key] = e.v;
+      if (!copied.has(e.r)) {
+        next[e.r] = { ...next[e.r] };
+        copied.add(e.r);
+      }
+      if (e.v) next[e.r][e.key] = e.v.slice(0, MAX_CELL);
       else delete next[e.r][e.key];
     }
     while (next.length && Object.keys(next[next.length - 1]).length === 0) next.pop();
@@ -212,10 +248,10 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
 
   const importRecords = (records: ImportRecord[], mode: ImportMode) => {
     const byName = layout(tree).nodes;
-    const nextRows: Row[] = mode === "add" ? rows.map((x) => ({ ...x })) : [];
+    const nextRows: Row[] = mode === "add" ? rows.slice() : [];
     const nextLabels: Record<string, string> = mode === "add" ? { ...labels } : {};
     const start = nextRows.length;
-    records.forEach((rec, i) => {
+    records.slice(0, Math.max(0, MAX_ROW + 1 - start)).forEach((rec, i) => {
       nextRows.push({ ...rec.values });
       const hit = rec.label ? byName.find((n) => n.name.toLowerCase() === rec.label!.toLowerCase()) : undefined;
       if (hit) nextLabels[start + i] = hit.id;
@@ -226,7 +262,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   };
 
   const exportCsv = () => {
-    const last = Math.max(rows.length, ...Object.keys(labels).map((k) => Number(k) + 1));
+    const last = Object.keys(labels).reduce((m, k) => Math.max(m, Number(k) + 1), rows.length);
     const table = [cols.map((c, i) => c.label || letter(i))];
     for (let r = 0; r < last; r++) table.push(cols.map((_, c) => cellText(r, c)));
     const url = URL.createObjectURL(new Blob(["\uFEFF" + toCsv(table)], { type: "text/csv;charset=utf-8" }));
@@ -351,12 +387,49 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
     return () => window.removeEventListener("keydown", onKey);
   }, [picker]);
   // Keep the active cell in view while moving with the keyboard. Mouse selections (clicking a row or column
-  // header moves `f` to the far corner) must not scroll.
+  // header moves `f` to the far corner) must not scroll. Rows are virtual, so the vertical move is done by hand.
   useEffect(() => {
     if (!keyNav.current) return;
     keyNav.current = false;
-    grid.current?.querySelector(`[data-cell="${sel.f[0]}-${sel.f[1]}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const g = grid.current;
+    if (!g) return;
+    const top = headH + sel.f[0] * rowH;
+    if (top < g.scrollTop + headH) g.scrollTop = Math.max(0, top - headH);
+    else if (top + rowH > g.scrollTop + g.clientHeight) g.scrollTop = top + rowH - g.clientHeight;
+    const cell = `[data-cell="${sel.f[0]}-${sel.f[1]}"]`;
+    requestAnimationFrame(() => grid.current?.querySelector(cell)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel.f]);
+
+  // Track the scroll position (once per frame) and the size of the scroll area.
+  useEffect(() => {
+    const g = grid.current;
+    if (!g) return;
+    const read = () => {
+      frame.current = 0;
+      setView((v) => (v.top === g.scrollTop && v.h === g.clientHeight ? v : { top: g.scrollTop, h: g.clientHeight }));
+    };
+    const on = () => {
+      if (!frame.current) frame.current = requestAnimationFrame(read);
+    };
+    read();
+    g.addEventListener("scroll", on, { passive: true });
+    const ro = new ResizeObserver(on);
+    ro.observe(g);
+    return () => {
+      g.removeEventListener("scroll", on);
+      ro.disconnect();
+      cancelAnimationFrame(frame.current);
+    };
+  }, []);
+
+  // The real heights (fonts, zoom) decide where rows sit; measure them instead of trusting the constants.
+  useEffect(() => {
+    const r = grid.current?.querySelector("tbody tr[data-row]")?.getBoundingClientRect().height;
+    const h = grid.current?.querySelector("thead")?.getBoundingClientRect().height;
+    if (r && Math.abs(r - rowH) > 0.1) setRowH(r);
+    if (h && Math.abs(h - headH) > 0.1) setHeadH(h);
+  }, [rowH, headH, view.h, total]);
 
   const startResize = (key: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -393,6 +466,14 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
     setOverKey(null);
   };
 
+  const first = Math.max(0, Math.floor(view.top / rowH) - OVERSCAN);
+  const last = Math.min(total, Math.ceil((view.top + view.h) / rowH) + OVERSCAN);
+  // A cell being edited that scrolls out of the page is saved, not lost.
+  useEffect(() => {
+    const e = editRef.current;
+    if (e && (e[0] < first || e[0] >= last)) finishEdit(true);
+  });
+
   const head = "h-8 border-b border-r border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-400 select-none";
 
   return (
@@ -419,7 +500,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
             </div>
             <div className="flex items-baseline gap-1.5">
               <dt>Outreached</dt>
-              <dd className="font-brand text-xl font-bold tracking-[-0.03em] tabular-nums text-neutral-950">0</dd>
+              <dd className="font-brand text-xl font-bold tracking-[-0.03em] tabular-nums text-neutral-950">{outreached}</dd>
             </div>
           </dl>
         </div>
@@ -455,7 +536,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
       {cfg && <ScrapeBar id={id} domainId={domainId} cityId={cityId} queries={cfg.queries.length} resetKey={setupKey} />}
 
       {/* Spreadsheet */}
-      <div className="mt-5 flex min-h-96 flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-300 bg-white">
+      <div className="mt-5 flex h-[calc(100dvh-17rem)] min-h-96 flex-none flex-col overflow-hidden rounded-2xl border border-neutral-300 bg-white">
         <div ref={grid} tabIndex={0} onPointerDownCapture={() => (keyNav.current = false)} onKeyDown={onKeyDown} onCopy={onCopy} onCut={onCut} onPaste={onPaste} className="relative flex-1 overflow-auto outline-none">
           <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableW }}>
             <colgroup>
@@ -464,7 +545,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                 <col key={c.key} style={{ width: widthOf(c.key) }} />
               ))}
             </colgroup>
-            <thead className="sticky top-0 z-10">
+            <thead className="sticky top-0 z-30">
               <tr>
                 <th
                   className={cn(head, "sticky left-0 z-20 cursor-pointer")}
@@ -523,8 +604,13 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
               </tr>
             </thead>
             <tbody>
-              {Array.from({ length: total }, (_, r) => (
-                <tr key={r}>
+              {first > 0 && (
+                <tr aria-hidden>
+                  <td colSpan={colCount + 1} style={{ height: first * rowH, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {Array.from({ length: Math.max(0, last - first) }, (_, k) => first + k).map((r) => (
+                <tr key={r} data-row={r}>
                   <td
                     onClick={() => (setSel({ a: [r, 0], f: [r, colCount - 1] }), grid.current?.focus())}
                     className={cn("sticky left-0 z-10 h-9 cursor-pointer select-none border-b border-r border-neutral-200 bg-neutral-50 text-center text-xs text-neutral-400", r >= r1 && r <= r2 && "text-emerald-700")}
@@ -563,6 +649,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                           <input
                             autoFocus
                             value={draft}
+                            maxLength={MAX_CELL}
                             onChange={(e) => setDraft(e.target.value)}
                             onBlur={() => finishEdit(true)}
                             onKeyDown={(e) => {
@@ -595,6 +682,11 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                   })}
                 </tr>
               ))}
+              {last < total && (
+                <tr aria-hidden>
+                  <td colSpan={colCount + 1} style={{ height: (total - last) * rowH, padding: 0, border: 0 }} />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -634,6 +726,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
           fileName={csv.name}
           data={csv.data}
           existing={leadCount}
+          canReplace={campaign.myRole !== "member"}
+          teammates={Math.max(0, (campaign.members?.length ?? 1) - 1)}
           targets={cols.map((c, i) => ({ key: c.key, name: c.label || `Column ${letter(i)}` }))}
           onClose={() => setCsv(null)}
           onImport={importRecords}

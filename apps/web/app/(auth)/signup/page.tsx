@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Logo } from "@/components/logo";
 import { SignupForm } from "./signup-form";
+
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 async function SignupBody({ searchParams }: Pick<PageProps<"/signup">, "searchParams">) {
   const { next, error } = await searchParams;

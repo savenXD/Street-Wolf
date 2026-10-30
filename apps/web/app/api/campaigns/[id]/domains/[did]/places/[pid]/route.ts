@@ -3,7 +3,7 @@ import { cellKey } from "@/lib/server/schemas";
 import { col } from "@street-wolf/db";
 import { requireRole } from "@/lib/server/access";
 import { api, body, conflict, notFound, ok } from "@/lib/server/http";
-import { recount } from "@/lib/server/sheets";
+import { purgeLeads, recount, releasePlaces } from "@/lib/server/sheets";
 import { requireBrowserUser } from "@/lib/server/session";
 
 const Patch = z.object({
@@ -13,6 +13,9 @@ const Patch = z.object({
   dropFields: z.array(cellKey).max(60).optional(),
   view: z.object({ order: z.array(z.string().max(60)).max(100).optional(), widths: z.record(z.string().max(60), z.number().min(20).max(2000)).optional() }).nullable().optional(),
 });
+
+/** Long enough for the biggest delete, save or repair; hosts that cap functions lower than this use their own limit. */
+export const maxDuration = 60;
 
 export const PATCH = api<{ id: string; did: string; pid: string }>(async (req, { id, did, pid }) => {
   const user = await requireBrowserUser(req);
@@ -28,9 +31,11 @@ export const PATCH = api<{ id: string; did: string; pid: string }>(async (req, {
   let stats: unknown;
   if (dropFields?.length) {
     const leads = await col("leads");
-    await leads.updateMany({ placeId: pid, campaignId: id }, { $unset: Object.fromEntries(dropFields.map((k) => [`cells.${k}`, ""])) });
-    // A lead that has nothing left (no cells, no label) is no lead any more.
-    await leads.deleteMany({ placeId: pid, campaignId: id, label: null, cells: {} });
+    // updatedAt moves so teammates' open sheets lose the column's values on their next live sync.
+    await leads.updateMany({ placeId: pid, campaignId: id }, { $unset: Object.fromEntries(dropFields.map((k) => [`cells.${k}`, ""])), $set: { updatedAt: new Date() }, $pull: { edited: { $in: dropFields } } } as never);
+    // A lead that has nothing left (no cells, no label) is no lead any more: it stays as an empty row (so teammates see it
+    // vanish) but loses its scrape id, so a later scrape can add that business again.
+    await leads.updateMany({ placeId: pid, campaignId: id, label: null, cells: {}, sourceId: { $type: "string" } }, { $set: { source: "manual", sourceId: null } });
     stats = await recount(pid);
   }
   return ok({ ok: true, stats });
@@ -39,7 +44,8 @@ export const PATCH = api<{ id: string; did: string; pid: string }>(async (req, {
 export const DELETE = api<{ id: string; did: string; pid: string }>(async (req, { id, did, pid }) => {
   const user = await requireBrowserUser(req);
   await requireRole(id, user._id, "admin");
-  await (await col("leads")).deleteMany({ campaignId: id, placeId: pid });
+  await releasePlaces(id, [pid]); // people's outreach numbers drop by what this sheet had credited them
+  await purgeLeads([pid]);
   await (await col("jobs")).deleteMany({ campaignId: id, placeId: pid }); // a running scraper notices its job is gone and stops
   await (await col("places")).deleteOne({ _id: pid, campaignId: id, domainId: did });
   return ok({ ok: true });

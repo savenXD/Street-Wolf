@@ -13,6 +13,10 @@ export const env = {
   googleId: trim(process.env.GOOGLE_CLIENT_ID),
   googleSecret: trim(process.env.GOOGLE_CLIENT_SECRET),
   cronSecret: trim(process.env.CRON_SECRET),
+  /** Proxies we trust to append to x-forwarded-for (Vercel: 1). The client address is that many entries from the right. */
+  proxyHops: Math.max(1, Number(process.env.TRUSTED_PROXY_HOPS ?? 1) || 1),
+  /** Encrypts invite links at rest. Falls back to CRON_SECRET; in dev a fixed key is used. Without any, links aren't kept. */
+  appSecret: trim(process.env.APP_SECRET) ?? trim(process.env.CRON_SECRET) ?? (process.env.NODE_ENV === "production" ? undefined : "street-wolf-dev-secret"),
   /** Dev convenience: sign-in links are returned in the response when no email provider is configured. */
   exposeDevLinks: !(process.env.NODE_ENV === "production") && !trim(process.env.RESEND_API_KEY),
 };

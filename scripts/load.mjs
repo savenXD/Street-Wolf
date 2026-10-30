@@ -33,7 +33,7 @@ async function user(i) {
   await call("campaign.create", "POST", "/api/campaigns", { id: cid, name: `Load ${i}`, features: ["googlemaps:scrape"] });
   await call("domain.create", "POST", `/api/campaigns/${cid}/domains`, { id: did, name: "Gyms" });
   await call("place.create", "POST", `/api/campaigns/${cid}/domains/${did}/places`, { id: pid, name: "Jaipur" });
-  const changes = Array.from({ length: 50 }, (_, r) => ({ row: r, cells: { name: `Biz ${r}`, phone: `+91 ${r}` }, label: r % 3 ? "interested" : null }));
+  const changes = Array.from({ length: 50 }, (_, r) => ({ row: r, set: { name: `Biz ${r}`, phone: `+91 ${r}` }, label: r % 3 ? "interested" : null }));
   await call("sheet.write", "PATCH", `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`, { changes });
   await call("bootstrap", "GET", "/api/bootstrap");
   await call("sheet.read", "GET", `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`);

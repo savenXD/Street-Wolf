@@ -14,7 +14,7 @@ export const googleMapsInput = z.object({
       reviews: z.boolean().default(true),
       hours: z.boolean().default(false),
     })
-    .default({}),
+    .prefault({}),
   findEmails: z.boolean().default(false),
   // Headed opens a visible browser window; only meaningful on a machine with a display.
   headless: z.boolean().default(true),

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import Link from "next/link";
 import { ArrowRight, Star } from "lucide-react";
 import { BrandIcon } from "@/components/brand-icon";
 import { DotField } from "@/components/landing/dot-field";
@@ -9,8 +11,11 @@ import { MotionRoot, Reveal } from "@/components/landing/reveal";
 import { SmoothScroll } from "@/components/landing/smooth-scroll";
 import { Logo } from "@/components/logo";
 import { ButtonLink } from "@/components/ui/button";
+import { jsonLd, pageMetadata, siteJsonLd } from "@/lib/seo";
 import { githubUrl, site } from "@/lib/site";
 import { cacheLife } from "next/cache";
+
+export const metadata: Metadata = { ...pageMetadata({ path: "/", title: site.title, description: site.description }), title: { absolute: site.title } };
 
 // Sharp downward-pointing teeth along the bottom edge of the nav bar.
 const zigzagTooth = "conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / 20px 10px repeat-x";
@@ -35,6 +40,7 @@ export default async function Landing() {
 
   return (
     <MotionRoot>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(siteJsonLd()) }} />
       <SmoothScroll />
       <div className="overflow-x-clip bg-white text-neutral-950">
         {/* Nav */}
@@ -84,14 +90,14 @@ export default async function Landing() {
               className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-3.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-950"
             >
               <BrandIcon name="github" className="size-3.5" />
-              Open source · Free forever · No paywall
+              Open source · Free forever · Runs locally
               <ArrowRight className="size-3" />
             </a>
           </Reveal>
           <HeroTitle />
           <Reveal immediate delay={0.6} className="mx-auto mt-6 max-w-2xl text-center text-base leading-relaxed text-neutral-600 sm:text-lg">
-            Find leads, message them, post, reply and even call, across Google, Instagram, Reddit, X and every channel we plug in next.
-            One dashboard, one open-source engine, yours to self-host.
+            Turn any Google Maps search into a lead sheet. <strong className="font-semibold text-neutral-950">100% free</strong>,{" "}
+            <strong className="font-semibold text-neutral-950">no paywalls</strong>, <strong className="font-semibold text-neutral-950">local first</strong>.
           </Reveal>
           <Reveal immediate delay={0.75} className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <ButtonLink href="/dashboard" size="lg" className="transition-transform hover:-translate-y-0.5">
@@ -137,6 +143,9 @@ export default async function Landing() {
             <Logo />
             <div className="flex flex-wrap items-center gap-5">
               <a href="#features" className="hover:text-neutral-950">Features</a>
+              <Link href="/google-maps-scraper" className="hover:text-neutral-950">Google Maps scraper</Link>
+              <Link href="/run-locally" className="hover:text-neutral-950">Run locally</Link>
+              <Link href="/open-source-lead-generation" className="hover:text-neutral-950">Open source</Link>
               <a href={githubUrl} target="_blank" rel="noreferrer" className="hover:text-neutral-950">GitHub</a>
               <a href={`${githubUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer" className="hover:text-neutral-950">License</a>
             </div>

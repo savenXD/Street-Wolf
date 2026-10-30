@@ -1,18 +1,19 @@
 "use client";
 
 import { AnimatePresence, motion, useInView } from "motion/react";
-import { Bell, Camera, Check, CheckCheck, ChevronRight, GripVertical, MoreVertical, Play, Search, ShoppingBag, Square } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Bell, Camera, Check, CheckCheck, ChevronRight, GripVertical, MoreVertical, PartyPopper, Play, Search, Square } from "lucide-react";
+import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import { BrandIcon } from "@/components/brand-icon";
 import { LabelChip } from "@/components/dashboard/label-chip";
 import type { LabelNode } from "@/lib/labels";
 
-// Made-up sample data; purely decorative. The demo shows a campaign that is already well under way and simply keeps working:
-// the scraper adds leads, WhatsApp messages go out to them a little behind, replies come in behind the messages and, every few
-// seconds, a payment or an order lands. It never "finishes". Everything is a formula of one clock (in seconds), and only the
-// handful of rows on screen are ever drawn, so it stays smooth however many leads the counters say.
-const TICK = 10; // React hears about the clock this many times a second; the sheet and its scroll run every frame
-const WRAP = 3000; // seconds, then the clock quietly starts over
+// Made-up sample data; purely decorative. One new lead lands every GAP seconds and then plays out the same short story on its own
+// timeline: scraped, WhatsApp sent (one grey tick), delivered (two grey), read (two blue), and then most answer: some interested,
+// some not, and a few go on to pay. Every row, chat, counter and toast is a formula of one clock (in seconds), so nothing is stored
+// and only the handful of rows on screen are ever drawn. Leads with a negative index are the ones already in the sheet at t = 0.
+const TICK = 10; // React hears about the clock this many times a second; the sheet scroll runs every frame
+const SPEED = 1.6; // demo clock runs this many times faster than real time
+const WRAP = 900; // seconds, then the clock quietly starts over
 const ROW_H = 36;
 
 const LEADS = [
@@ -22,20 +23,21 @@ const LEADS = [
   { name: "Chai & Chill", cat: "Tea house", phone: "+91 88••• 90312", rating: "4.3", reviews: "266", site: "chaichill.in", reply: "Sure 👍 send details" },
   { name: "Roastery & Co.", cat: "Roaster", phone: "+91 98••• 66051", rating: "4.7", reviews: "540", site: "roastery.co.in", reply: "Can we start with 3 kg?" },
   { name: "Brew Theory", cat: "Cafe", phone: "+91 99••• 38275", rating: "4.5", reviews: "703", site: "brewtheory.com", reply: "Yes, how do we order?" },
-  { name: "Mocha Mornings", cat: "Cafe", phone: "+91 96••• 52019", rating: "4.2", reviews: "148", site: "mochamornings.in" },
-  { name: "Bean Street", cat: "Coffee shop", phone: "+91 91••• 77643", rating: "4.6", reviews: "425", site: "beanstreet.cafe", reply: "Send samples first" },
-  { name: "Crema Corner", cat: "Cafe", phone: "+91 98••• 10596", rating: "4.4", reviews: "219", site: "cremacorner.in", reply: "Great timing, we're out!" },
-  { name: "Espresso Hub", cat: "Cafe", phone: "+91 93••• 84127", rating: "4.1", reviews: "97", site: "espressohub.in" },
-  { name: "Third Cup", cat: "Cafe", phone: "+91 98••• 23380", rating: "4.7", reviews: "632", site: "thirdcup.in", reply: "Interested, what's the MOQ?" },
-  { name: "Filter Kaapi Co.", cat: "Cafe", phone: "+91 89••• 45901", rating: "4.5", reviews: "388", site: "filterkaapi.co", reply: "Yes, let's talk 🙌" },
+  { name: "Mocha Mornings", cat: "Cafe", phone: "+91 96••• 52019", rating: "4.2", reviews: "148", site: "mochamornings.in", reply: "Send samples first" },
+  { name: "Bean Street", cat: "Coffee shop", phone: "+91 91••• 77643", rating: "4.6", reviews: "425", site: "beanstreet.cafe", reply: "Great timing, we're out!" },
+  { name: "Crema Corner", cat: "Cafe", phone: "+91 98••• 10596", rating: "4.4", reviews: "219", site: "cremacorner.in", reply: "Interested, what's the MOQ?" },
+  { name: "Espresso Hub", cat: "Cafe", phone: "+91 93••• 84127", rating: "4.1", reviews: "97", site: "espressohub.in", reply: "Yes, let's talk 🙌" },
+  { name: "Third Cup", cat: "Cafe", phone: "+91 98••• 23380", rating: "4.7", reviews: "632", site: "thirdcup.in", reply: "Can you share a price list?" },
+  { name: "Filter Kaapi Co.", cat: "Cafe", phone: "+91 89••• 45901", rating: "4.5", reviews: "388", site: "filterkaapi.co", reply: "Looks good, call us tomorrow" },
 ];
+const NO_REPLIES = ["Not right now, thanks", "We already have a supplier", "No thanks, not interested"];
 const N = LEADS.length;
 const AREAS = ["Koregaon Park", "Baner", "Kothrud", "Viman Nagar", "Aundh", "Hadapsar", "Camp", "Wakad", "Kalyani Nagar", "Deccan"];
 const COLORS = ["#2a6ff0", "#d62976", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"];
 const n0 = (n: number) => n.toLocaleString("en-IN");
 const rupees = (n: number) => `₹${n0(n)}`;
 
-/** Row k: the first 12 are the hand-written samples, every later row is the same shops in another area. */
+/** Row k (0-based): the first 12 are the hand-written samples, every later row is the same shops in another area. */
 function rowData(k: number) {
   const b = LEADS[k % N];
   const round = Math.floor(k / N);
@@ -49,89 +51,80 @@ function rowData(k: number) {
   };
 }
 
-// Where each stage's front is (a row number) at time t. Messages trail the scrape, replies trail the messages.
-const S0 = 624, S_RATE = 2.2; // leads scraped
-const M0 = 571, M_RATE = 1.7; // leads messaged
-const R_LAG = 4; // a reply lands this many rows behind the message front
-const scrapedFront = (t: number) => Math.floor(S0 + S_RATE * t);
-const messagedFront = (t: number) => Math.floor(M0 + M_RATE * t);
-const repliedFront = (t: number) => messagedFront(t) - R_LAG;
-const hasReply = (k: number) => !!LEADS[k % N].reply && (k < N || ((k * 2654435761) >>> 0) % 100 < 55);
-const REPLIES_UPTO = (() => {
-  const a = new Uint32Array(messagedFront(WRAP) + 2);
-  for (let k = 0; k < a.length - 1; k++) a[k + 1] = a[k] + (hasReply(k) ? 1 : 0);
-  return a; // REPLIES_UPTO[r] = how many of rows 0..r-1 have replied
-})();
-const timeMessaged = (k: number) => (k + 1 - M0) / M_RATE;
-const timeReplied = (k: number) => (k + 1 + R_LAG - M0) / M_RATE;
+// The sheet starts with FIRST rows; lead m (m >= 0 arrives later, m < 0 is already there) is row FIRST + m, 1-based.
+const FIRST = 633;
+const GAP = 2.6; // seconds between new leads
+const arrival = (m: number) => 1 + m * GAP;
+// Seconds after a lead arrives.
+const SENT = 1.2; // WhatsApp message goes out (one grey tick)
+const DELIVERED = 2.2; // two grey ticks
+const READ = 4.2; // two blue ticks
+const REPLY = 6.4; // their answer lands
+const LABELLED = 0.8; // the sheet label follows the answer this much later
+const PAID = 11; // a converted lead pays
+const LIFE = 4.6; // seconds a payment toast stays up
 
-// A payment or an order every GAP seconds, round and round. Each is tied to a shop that has already replied.
-const T0 = 2;
-const GAP = 5;
-const LIFE = 4;
-const KINDS = ["upi", "order", "upi", "upi", "order", "upi", "order", "upi", "upi"] as const;
+type Outcome = "none" | "interested" | "no" | "converted";
+// A repeating mix (13 is prime, so it never looks like a pattern): ~15% pay, ~30% interested, ~25% decline, the rest never answer.
+const MIX: Outcome[] = ["converted", "none", "interested", "no", "interested", "none", "no", "interested", "converted", "no", "interested", "none", "no"];
+const outcome = (m: number): Outcome => MIX[(((m + 2) % 13) + 13) % 13];
+const replies = (m: number) => outcome(m) !== "none";
 const AMOUNTS = [5000, 12500, 2500, 8000, 20000, 3200, 6400, 9500, 4200];
-const ORDERS = ["40 cups", "3 kg beans", "monthly plan"];
-const PAID0 = 6; // already collected before the demo starts
-const REVENUE0 = 36000;
-const eventAt = (j: number) => T0 + GAP * j;
-const eventNow = (t: number) => Math.floor((t - T0) / GAP);
-function eventLead(j: number) {
-  let k = repliedFront(eventAt(j)) - 8 - (j % 5);
-  while (k > 0 && !hasReply(k)) k--;
-  return k;
-}
-function eventInfo(j: number) {
-  const kind = KINDS[j % KINDS.length];
-  const name = rowData(eventLead(j)).name;
-  return kind === "upi"
-    ? { j, kind, at: eventAt(j), lead: eventLead(j), amount: AMOUNTS[j % AMOUNTS.length], title: `${rupees(AMOUNTS[j % AMOUNTS.length])} received`, sub: `from ${name} · UPI` }
-    : { j, kind, at: eventAt(j), lead: eventLead(j), amount: 0, title: `Order placed · #${1042 + j}`, sub: `${name} · ${ORDERS[j % ORDERS.length]}` };
-}
-const paidAt = (k: number, t: number) => {
-  for (let j = Math.max(0, eventNow(t) - 14); j <= eventNow(t); j++) if (KINDS[j % KINDS.length] === "upi" && eventLead(j) === k) return eventAt(j);
-  return Infinity;
+const amount = (m: number) => AMOUNTS[(((m + 2) % 13) + 13) % AMOUNTS.length];
+const replyText = (m: number) => (outcome(m) === "no" ? NO_REPLIES[(((m % 3) + 3) % 3)] : LEADS[(FIRST - 1 + m) % N].reply);
+
+// Counters: how many leads have passed a milestone by time t, from a prefix table over m = MIN..MAX.
+const MIN = -40;
+const MAX = Math.ceil(WRAP / GAP);
+const prefix = (f: (m: number) => boolean) => {
+  const a = new Uint32Array(MAX - MIN + 2);
+  for (let m = MIN; m <= MAX; m++) a[m - MIN + 1] = a[m - MIN] + (f(m) ? 1 : 0);
+  return a;
 };
-function totals(t: number) {
-  let paid = PAID0;
-  let revenue = REVENUE0;
-  for (let j = 0; j <= eventNow(t); j++) {
-    if (KINDS[j % KINDS.length] !== "upi") continue;
-    paid++;
-    revenue += AMOUNTS[j % AMOUNTS.length];
-  }
-  return { paid, revenue };
-}
+const REPLIED_UPTO = prefix(replies);
+const PAID_UPTO = (() => {
+  const a = new Uint32Array(MAX - MIN + 2);
+  for (let m = MIN; m <= MAX; m++) a[m - MIN + 1] = a[m - MIN] + (outcome(m) === "converted" ? amount(m) : 0);
+  return a;
+})();
+/** How many leads (m >= MIN) have reached a milestone `off` seconds after arriving. */
+const reached = (t: number, off: number) => Math.max(0, Math.min(MAX - MIN + 1, Math.floor((t - 1 - off) / GAP) - MIN + 1));
+const since0 = (f: (t: number) => number) => (t: number) => f(t) - f(0); // counters begin at their starting value
+const arrived = (t: number) => Math.max(0, Math.floor((t - 1) / GAP) + 1); // new leads (m >= 0) so far
+const sentSince = since0((t) => Math.floor((t - 1 - SENT) / GAP));
+const repliesSince = since0((t) => REPLIED_UPTO[reached(t, REPLY)]);
+const revenueSince = since0((t) => PAID_UPTO[reached(t, PAID)]);
+const leadsAt = (t: number) => FIRST - 1 + arrived(t);
+const outreachedAt = (t: number) => 580 + sentSince(t);
+const repliedAt = (t: number) => 264 + repliesSince(t);
+const revenueAt = (t: number) => 41000 + revenueSince(t);
 
 // Same chip as the real sheet, with the outreach outcomes as its label tree.
 const TREE: LabelNode = {
   id: "messaged",
   name: "Messaged",
   color: "#525252",
-  children: [{ id: "interested", name: "Interested", color: "#14b8a6", children: [{ id: "converted", name: "Converted", color: "#16a34a" }] }],
+  children: [
+    { id: "interested", name: "Interested", color: "#14b8a6", children: [{ id: "converted", name: "Converted", color: "#16a34a" }] },
+    { id: "no", name: "Not interested", color: "#ef4444" },
+  ],
 };
 
-function leadState(k: number, t: number) {
-  const pa = paidAt(k, t);
-  const sent = k < messagedFront(t);
-  const replied = hasReply(k) && k < repliedFront(t);
-  return {
-    appeared: k < scrapedFront(t),
-    sent,
-    read: k < messagedFront(t) - 2,
-    replied,
-    paid: t >= pa,
-    label: t >= pa ? "converted" : replied ? "interested" : sent ? "messaged" : undefined,
-    lastAt: Math.max(t >= pa ? pa : 0, replied ? timeReplied(k) : 0, sent ? timeMessaged(k) : 0),
-  };
+/** What lead m looks like at time t. */
+function leadState(m: number, t: number) {
+  const ta = t - arrival(m);
+  const o = outcome(m);
+  const sent = ta >= SENT;
+  const replied = o !== "none" && ta >= REPLY;
+  const paid = o === "converted" && ta >= PAID; // the label turns Converted at the same moment the payment notification lands
+  const label = paid ? "converted" : replied && ta >= REPLY + LABELLED ? (o === "no" ? "no" : "interested") : sent ? "messaged" : undefined;
+  const ticks = ta >= READ ? 3 : ta >= DELIVERED ? 2 : 1; // 1 grey tick, 2 grey ticks, 2 blue ticks
+  const lastAt = paid ? arrival(m) + PAID : replied ? arrival(m) + REPLY : arrival(m) + SENT;
+  return { appeared: ta >= 0, sent, replied, paid, label, ticks, lastAt };
 }
 
-/** The first visible row: a little behind the message front, so you see sent and answered rows together; it cuts to a shop whenever it pays. */
-function topAt(t: number) {
-  const j = eventNow(t);
-  if (j >= 0 && t < eventAt(j) + LIFE - 0.5) return Math.max(0, eventLead(j) - 3);
-  return Math.max(0, messagedFront(t) - 5);
-}
+/** The scroll target: the newest row sits a few rows from the top, leaving two blank rows beneath it. */
+const topAt = (t: number) => FIRST - 1 + arrived(t) - 1 - 4;
 
 const COLS = [
   { label: "Label", w: 168 },
@@ -145,7 +138,9 @@ const COLS = [
 const ROW_W = 48 + COLS.reduce((n, c) => n + c.w, 0);
 const letter = (i: number) => String.fromCharCode(65 + i);
 const head = "h-8 shrink-0 border-b border-r border-neutral-200 bg-neutral-50 text-center text-xs leading-8 font-medium text-neutral-400 select-none";
-const VISIBLE = 9;
+const VISIBLE = 9; // rows drawn: 7 on screen plus one above and one below while the layer glides
+const ROWS_SHOWN = 7;
+const BASE = FIRST - 1; // row index (0-based) of lead m = BASE + m
 
 const SheetRow = memo(function SheetRow({ k, appeared, label }: { k: number; appeared: boolean; label?: string }) {
   const d = rowData(k);
@@ -155,7 +150,9 @@ const SheetRow = memo(function SheetRow({ k, appeared, label }: { k: number; app
       <div className="flex shrink-0 items-center justify-center border-b border-r border-neutral-200 bg-neutral-50 text-xs text-neutral-400" style={{ width: 48 }}>{k + 1}</div>
       {cells.map((c, j) => (
         <div key={j} style={{ width: COLS[j].w }} className="flex shrink-0 items-center overflow-hidden border-b border-r border-neutral-100 px-3 text-sm whitespace-nowrap">
-          {appeared && (j === 0 ? <LabelChip tree={TREE} id={label} /> : <span className="truncate">{c}</span>)}
+          {appeared && (
+            <span className="min-w-0 animate-rowin">{j === 0 ? <LabelChip tree={TREE} id={label} /> : <span className="block truncate">{c}</span>}</span>
+          )}
         </div>
       ))}
     </div>
@@ -164,7 +161,7 @@ const SheetRow = memo(function SheetRow({ k, appeared, label }: { k: number; app
 
 /**
  * A virtual sheet: only a screenful of rows exist. The scroll is driven every animation frame (a transform, no React work),
- * easing toward topAt(), so it glides at any speed; the row contents refresh with the 10-per-second tick.
+ * easing toward topAt() so each new lead nudges the sheet up one row; the row contents refresh with the 10-per-second tick.
  */
 function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; running: boolean }) {
   const layer = useRef<HTMLDivElement>(null);
@@ -182,7 +179,7 @@ function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; run
       last = now;
       const t = clock.current;
       const target = topAt(t);
-      top.current = t < prev ? target : top.current + (target - top.current) * (1 - Math.exp(-dt * 2.5));
+      top.current = t < prev ? target : top.current + (target - top.current) * (1 - Math.exp(-dt * 3 * SPEED));
       prev = t;
       if (layer.current) layer.current.style.transform = `translate3d(0, ${-(top.current - k0.current) * ROW_H}px, 0)`;
     };
@@ -196,7 +193,7 @@ function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; run
 
   return (
     <div className="mt-5 flex flex-col overflow-hidden rounded-2xl border border-neutral-300 bg-white">
-      <div className="relative h-[292px] overflow-hidden">
+      <div className="relative overflow-hidden" style={{ height: 72 + ROWS_SHOWN * ROW_H }}>
         <div className="absolute inset-x-0 top-0 z-10 bg-white" style={{ width: ROW_W }}>
           <div className="flex">
             <div className={head} style={{ width: 48 }} />
@@ -217,7 +214,7 @@ function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; run
         <div className="absolute inset-x-0 top-[72px] bottom-0 overflow-hidden">
           <div ref={layer} className="will-change-transform">
             {rows.map((k) => {
-              const st = leadState(k, t);
+              const st = leadState(k - BASE, t);
               return <SheetRow key={k} k={k} appeared={st.appeared} label={st.label} />;
             })}
           </div>
@@ -225,37 +222,89 @@ function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; run
       </div>
       <div className="flex h-8 items-center justify-between border-t border-neutral-200 bg-neutral-50 px-3 text-xs text-neutral-500">
         <span className="truncate">cafes in Pune · coffee shops in Pune</span>
-        <span className="shrink-0 tabular-nums">{n0(scrapedFront(t))} rows · {COLS.length - 1} columns</span>
+        <span className="shrink-0 tabular-nums">{n0(leadsAt(t))} rows · {COLS.length - 1} columns</span>
       </div>
     </div>
   );
 }
 
-/** The seven chats with the latest activity (a message sent, a reply, a payment). Refreshed every ~1.2s so the list stays readable. */
-function recentChats(t: number) {
-  const front = messagedFront(t);
-  const all: { k: number; at: number }[] = [];
-  for (let k = Math.max(0, front - 40); k < front; k++) all.push({ k, at: leadState(k, t).lastAt });
-  return all.sort((a, b) => b.at - a.at).slice(0, 7).map((x) => x.k);
+// The phone's clock: 8 seconds of the demo is one minute on it.
+function clockAt(at: number) {
+  const mins = 10 * 60 + 42 + Math.floor(at / 8);
+  return `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, "0")}`;
 }
+
+const CHATS_SHOWN = 6;
+const CHAT_H = 52;
+const WA_BLUE = "#53bdeb";
+
+/** The chats with the latest activity (a message sent, an answer, a payment), newest first. */
+function recentChats(t: number) {
+  const latest = arrived(t) - 1;
+  const all: { m: number; at: number }[] = [];
+  for (let m = latest - 14; m <= latest; m++) {
+    const st = leadState(m, t);
+    if (st.sent) all.push({ m, at: st.lastAt });
+  }
+  return all.sort((a, b) => b.at - a.at).slice(0, CHATS_SHOWN).map((x) => x.m);
+}
+
+function Ticks({ n }: { n: number }) {
+  return n === 1 ? (
+    <Check className="size-[15px] shrink-0 text-neutral-400" strokeWidth={2.4} />
+  ) : (
+    <CheckCheck className="size-[15px] shrink-0" strokeWidth={2.4} style={{ color: n === 3 ? WA_BLUE : "#a3a3a3" }} />
+  );
+}
+
+const Chat = memo(function Chat({ m, st }: { m: number; st: ReturnType<typeof leadState> }) {
+  const l = rowData(BASE + m);
+  const mine = !st.replied || st.paid; // whose message the preview is
+  const preview = st.paid ? "Payment received, thank you 🙏" : st.replied ? replyText(m) : "Hi! Fresh beans for Pune cafes ☕ Free sample?";
+  const unread = st.replied && !st.paid;
+  return (
+    <motion.div
+      layout="position"
+      initial={{ opacity: 0, y: -16 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, transition: { duration: 0.3 } }}
+      transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+      className="flex items-center gap-3 px-4"
+      style={{ height: CHAT_H }}
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ background: COLORS[(BASE + m) % COLORS.length] }}>
+        {l.name[0]}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="truncate text-[13.5px] leading-5 font-semibold text-neutral-950">{l.name}</span>
+          <span className={`shrink-0 text-[11px] leading-5 tabular-nums ${unread ? "font-semibold text-[#1fa855]" : "text-neutral-400"}`}>{clockAt(st.lastAt)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className={`flex min-w-0 items-center gap-1 text-[12.5px] leading-5 ${unread ? "font-medium text-neutral-900" : "text-neutral-500"}`}>
+            {mine && <Ticks n={st.paid ? 3 : st.ticks} />}
+            <span className="truncate">{preview}</span>
+          </span>
+          {unread && <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-[#25d366] text-[10px] font-bold text-white">1</span>}
+        </div>
+      </div>
+    </motion.div>
+  );
+});
 
 function Phone({ s }: { s: number }) {
   const t = s / TICK;
-  const sent = messagedFront(t);
-  const replies = REPLIES_UPTO[Math.min(repliedFront(t), REPLIES_UPTO.length - 1)];
-  const qs = Math.floor(s / 12) * 12;
-  const chats = useMemo(() => recentChats(qs / TICK), [qs]);
-  const list = chats.map((k) => ({ k, l: rowData(k), reply: LEADS[k % N].reply ?? "", st: leadState(k, qs / TICK) }));
+  const list = recentChats(t).map((m) => ({ m, st: leadState(m, t) }));
 
   return (
-    <div className="h-[440px] w-[250px] overflow-hidden rounded-[2.2rem] border-[6px] border-neutral-900 bg-white shadow-[0_30px_60px_-20px_rgba(0,0,0,0.45)]">
-      <div className="flex items-center justify-between px-5 pt-2 text-[10px] font-semibold">
-        <span>10:42</span>
-        <span className="h-3.5 w-14 rounded-full bg-neutral-900" />
+    <div className="w-[262px] overflow-hidden rounded-[2.3rem] border-[6px] border-neutral-900 bg-white shadow-[0_30px_60px_-20px_rgba(0,0,0,0.45)]">
+      <div className="flex items-center justify-between px-6 pt-2.5 text-[11px] font-semibold">
+        <span className="tabular-nums">{clockAt(t)}</span>
+        <span className="h-4 w-16 rounded-full bg-neutral-900" />
         <span>5G</span>
       </div>
-      <div className="flex items-center justify-between px-4 pt-2 pb-1">
-        <span className="flex items-center gap-1.5 text-xl font-bold tracking-tight text-[#128c7e]">
+      <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
+        <span className="flex items-center gap-1.5 text-[21px] font-bold tracking-tight text-[#128c7e]">
           <BrandIcon name="whatsapp" colored className="size-[22px]" />
           WhatsApp
         </span>
@@ -265,84 +314,90 @@ function Phone({ s }: { s: number }) {
           <MoreVertical className="size-4" />
         </span>
       </div>
-      <div className="flex gap-1.5 px-4 py-1.5 text-[11px]">
-        <span className="rounded-full bg-[#d9fdd3] px-2.5 py-1 font-medium text-[#0b6a3f]">All</span>
-        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-neutral-600">Unread {n0(replies)}</span>
-        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-neutral-600">Leads</span>
+      <div className="flex gap-1.5 px-4 py-2 text-[11.5px]">
+        <span className="rounded-full bg-[#d9fdd3] px-3 py-1 font-medium text-[#0b6a3f]">All</span>
+        <span className="rounded-full bg-neutral-100 px-3 py-1 text-neutral-600">Unread {n0(repliedAt(t))}</span>
+        <span className="rounded-full bg-neutral-100 px-3 py-1 text-neutral-600">Leads</span>
       </div>
-      <div className="mx-3 mb-1 flex items-center justify-between rounded-lg bg-[#d9fdd3] px-2.5 py-1.5 text-[11px] font-medium text-[#0b6a3f]">
-        <span>{`${n0(sent)} sent · ${n0(replies)} replies`}</span>
-        <span className="flex items-center gap-1 tabular-nums"><span className="size-1.5 animate-pulse rounded-full bg-[#25d366]" />live</span>
+      <div className="mx-4 mb-1.5 flex items-center justify-between rounded-lg bg-[#d9fdd3] px-3 py-1.5 text-[11.5px] font-medium text-[#0b6a3f]">
+        <span className="tabular-nums">{`${n0(outreachedAt(t))} sent · ${n0(repliedAt(t))} replies`}</span>
+        <span className="flex items-center gap-1"><span className="size-1.5 animate-pulse rounded-full bg-[#25d366]" />live</span>
       </div>
-      <div>
-        {list.map(({ k, l, reply, st }) => {
-          const preview = st.paid ? "Payment done ✅" : st.replied ? reply : "Hi! Fresh beans for Pune cafes ☕ Free sample?";
-          return (
-            <motion.div
-              key={k}
-              layout="position"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="flex h-[48px] items-center gap-2.5 px-4"
-            >
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: COLORS[k % COLORS.length] }}>
-                {l.name[0]}
-              </span>
-              <div className="min-w-0 flex-1 leading-tight">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-[13px] font-semibold">{l.name}</span>
-                  <span className={`text-[10px] ${st.replied && !st.paid ? "font-semibold text-[#25d366]" : "text-neutral-400"}`}>10:4{k % 10}</span>
-                </div>
-                <div className="flex items-center justify-between gap-1.5">
-                  <span className={`flex min-w-0 items-center gap-1 truncate text-[11.5px] ${st.replied ? "font-medium text-neutral-900" : "text-neutral-500"}`}>
-                    {!st.replied &&
-                      (st.read ? <CheckCheck className="size-3.5 shrink-0 text-sky-500" /> : <Check className="size-3.5 shrink-0 text-neutral-400" />)}
-                    <span className="truncate">{preview}</span>
-                  </span>
-                  {st.replied && !st.paid && <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-[9px] font-bold text-white">1</span>}
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
+      <div className="relative overflow-hidden" style={{ height: CHATS_SHOWN * CHAT_H + 4 }}>
+        <AnimatePresence initial={false} mode="popLayout">
+          {list.map(({ m, st }) => (
+            <Chat key={m} m={m} st={st} />
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
 
+const CONFETTI = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#a855f7", "#eab308"];
 
-function Toasts({ t }: { t: number }) {
-  const j = eventNow(t);
-  const live = [j - 2, j - 1, j].filter((x) => x >= 0 && t < eventAt(x) + LIFE).map(eventInfo);
+/** A short pop of confetti off the toast's right edge: a party popper that tips in, and 18 flecks that fly out and fall. Transforms only. */
+function PartyPop() {
   return (
-    <div className="pointer-events-none absolute top-3 left-3 z-30 flex w-[270px] flex-col gap-2 sm:left-6">
+    <div aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-0">
+      <motion.span
+        className="absolute -top-2 left-1 text-amber-500"
+        initial={{ scale: 0, rotate: -40, opacity: 0 }}
+        animate={{ scale: [0, 1.25, 1], rotate: [-40, 12, 0], opacity: [0, 1, 1, 0] }}
+        transition={{ duration: 1.6, times: [0, 0.3, 0.45, 1], ease: "easeOut" }}
+      >
+        <PartyPopper className="size-7" />
+      </motion.span>
+      {Array.from({ length: 18 }, (_, i) => {
+        const ang = -Math.PI * 0.3 + (i / 17) * Math.PI * 0.85 + ((i * 37) % 7) * 0.03; // fans out to the right and down (the card clips anything above the toast)
+        const dist = 50 + ((i * 53) % 45);
+        const x = Math.cos(ang) * dist;
+        const y = Math.sin(ang) * dist;
+        return (
+          <motion.span
+            key={i}
+            className="absolute rounded-[1px]"
+            style={{ width: i % 3 ? 5 : 3, height: i % 3 ? 9 : 3, background: CONFETTI[i % CONFETTI.length] }}
+            initial={{ x: 0, y: 0, opacity: 0, scale: 0.4 }}
+            animate={{ x: [0, x, x * 1.12], y: [0, y, y + 30], opacity: [0, 1, 0], scale: [0.4, 1, 0.9], rotate: [0, 160 + i * 20] }}
+            transition={{ duration: 1.3, delay: 0.05 + (i % 4) * 0.03, times: [0, 0.45, 1], ease: "easeOut" }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** PhonePe-style payment notifications, one at a time (a converted lead pays every ~17s). */
+function Toasts({ t }: { t: number }) {
+  const live: { m: number; at: number }[] = [];
+  for (let m = Math.floor((t - 1 - PAID - LIFE) / GAP) - 1; m <= Math.floor((t - 1 - PAID) / GAP) + 1; m++) {
+    const at = arrival(m) + PAID;
+    if (outcome(m) === "converted" && t >= at && t < at + LIFE) live.push({ m, at });
+  }
+  return (
+    <div className="pointer-events-none absolute top-3 left-3 z-30 flex w-[280px] flex-col gap-2 sm:left-6">
       <AnimatePresence mode="popLayout" initial={false}>
-        {live.map((m) => (
+        {live.map(({ m }) => (
           <motion.div
-            key={m.j}
+            key={m}
             layout="position"
             initial={{ opacity: 0, y: -14, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.97, transition: { duration: 0.3, ease: "easeOut" } }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="flex transform-gpu items-center gap-3 rounded-2xl border border-white/60 bg-white/55 px-3 py-2.5 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.22)] backdrop-blur-xl"
+            className="relative flex transform-gpu items-center gap-3 rounded-2xl border border-white/60 bg-white/55 px-3 py-2.5 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.22)] backdrop-blur-xl"
           >
-            {m.kind === "upi" ? (
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#5f259f]">
-                <BrandIcon name="phonepe" className="size-6 text-white" />
-              </span>
-            ) : (
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-neutral-950 text-white">
-                <ShoppingBag className="size-[18px]" />
-              </span>
-            )}
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#5f259f]">
+              <BrandIcon name="phonepe" className="size-6 text-white" />
+            </span>
             <div className="min-w-0 leading-tight">
-              <div className="text-[10px] font-semibold tracking-wide text-neutral-500 uppercase">{m.kind === "upi" ? "PhonePe" : "New order"}</div>
-              <div className="truncate text-sm font-semibold text-neutral-950">{m.title}</div>
-              <div className="truncate text-xs text-neutral-600">{m.sub}</div>
+              <div className="text-[10px] font-semibold tracking-wide text-neutral-500 uppercase">PhonePe</div>
+              <div className="truncate text-sm font-semibold text-neutral-950">{rupees(amount(m))} received</div>
+              <div className="truncate text-xs text-neutral-600">from {rowData(BASE + m).name} · UPI</div>
             </div>
             <span className="ml-auto self-start text-[10px] text-neutral-500">now</span>
+            <PartyPop />
           </motion.div>
         ))}
       </AnimatePresence>
@@ -359,6 +414,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: str
   );
 }
 
+// The progress bar fills toward this many leads, so it only moves when a lead lands.
+const BAR_TARGET = 1000;
 const STAGES = ["Scraping Google Maps", "WhatsApp outreach", "Replies & orders"];
 
 /** A campaign already in full swing: leads keep arriving, WhatsApp keeps going out, replies and UPI payments keep coming in. */
@@ -375,7 +432,7 @@ export function HeroDemo() {
     let shown = -1;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      clock.current = (clock.current + Math.min(250, now - last) / 1000) % WRAP;
+      clock.current = (clock.current + Math.min(250, now - last) * SPEED / 1000) % WRAP;
       last = now;
       const i = Math.floor(clock.current * TICK);
       if (i !== shown) {
@@ -388,10 +445,10 @@ export function HeroDemo() {
   }, [inView]);
 
   const t = s / TICK;
-  const leads = scrapedFront(t);
-  const outreached = messagedFront(t);
-  const replies = REPLIES_UPTO[Math.min(repliedFront(t), REPLIES_UPTO.length - 1)];
-  const { revenue } = totals(t);
+  const leads = leadsAt(t);
+  const outreached = outreachedAt(t);
+  const replies = repliedAt(t);
+  const revenue = revenueAt(t);
 
   return (
     <div
@@ -458,7 +515,7 @@ export function HeroDemo() {
                 <span className="tabular-nums text-neutral-500">{n0(leads)} leads · 2 queries</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
-                <div className="h-full w-2/5 animate-loadbar rounded-full bg-neutral-950" />
+                <div className="h-full rounded-full bg-neutral-950 transition-[width] duration-700 ease-out" style={{ width: `${(leads / BAR_TARGET) * 100}%` }} />
               </div>
             </div>
           </div>

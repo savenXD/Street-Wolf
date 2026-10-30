@@ -2,7 +2,11 @@ import { z } from "zod";
 import { col } from "@street-wolf/db";
 import { requireRole } from "@/lib/server/access";
 import { api, body, notFound, ok } from "@/lib/server/http";
+import { purgeLeads, releasePlaces } from "@/lib/server/sheets";
 import { requireBrowserUser } from "@/lib/server/session";
+
+/** Long enough for the biggest delete, save or repair; hosts that cap functions lower than this use their own limit. */
+export const maxDuration = 60;
 
 export const PATCH = api<{ id: string; did: string }>(async (req, { id, did }) => {
   const user = await requireBrowserUser(req);
@@ -19,7 +23,8 @@ export const DELETE = api<{ id: string; did: string }>(async (req, { id, did }) 
   await requireRole(id, user._id, "admin");
   const places = await (await col("places")).find({ campaignId: id, domainId: did }, { projection: { _id: 1 } }).toArray();
   const pids = places.map((p) => p._id);
-  await (await col("leads")).deleteMany({ campaignId: id, placeId: { $in: pids } });
+  await releasePlaces(id, pids);
+  await purgeLeads(pids);
   await (await col("jobs")).deleteMany({ campaignId: id, placeId: { $in: pids } });
   await (await col("places")).deleteMany({ campaignId: id, domainId: did });
   await (await col("domains")).deleteOne({ _id: did, campaignId: id });

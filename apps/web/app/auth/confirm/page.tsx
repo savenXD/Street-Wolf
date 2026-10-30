@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Logo } from "@/components/logo";
 import { Confirm } from "./confirm";
+
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 async function Body({ searchParams }: Pick<PageProps<"/auth/confirm">, "searchParams">) {
   const { token } = await searchParams;

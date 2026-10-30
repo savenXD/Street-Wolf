@@ -1,6 +1,8 @@
 // End-to-end check of the whole backend against a real MongoDB and a running Next server.
 //   BASE=http://localhost:3100 node scripts/e2e.mjs
 // Expects the server to run with MONGODB_URI pointing at a throwaway database and no RESEND_API_KEY / Google keys.
+// Do NOT run it against a second `next dev` while your own `pnpm dev` is up: two dev servers in one project keep rewriting
+// next-env.d.ts and trigger each other's rebuilds, so the browser reloads in a loop. Stop `pnpm dev` first (or test a `next build` + `next start`).
 import { createRequire } from "node:module";
 const BASE = process.env.BASE ?? "http://localhost:3100";
 const MONGO = process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27099";
@@ -143,16 +145,16 @@ t("member adds a domain with an image link", (await b.post(`/api/campaigns/${cid
 t("rejects a javascript: image link", (await b.post(`/api/campaigns/${cid}/domains`, { name: "bad", image: "javascript:alert(1)" })).status === 400);
 t("adds a place", (await b.post(`/api/campaigns/${cid}/domains/${did}/places`, { id: pid, name: "Delhi NCR" })).status === 201);
 const S = `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`;
-const w1 = await b.patch(S, { changes: [{ row: 0, cells: { name: "Level Up Arena", phone: "+91 90000 11111" }, label: "interested" }, { row: 1, cells: { name: "Pixel Hub" }, label: "converted" }, { row: 3, cells: { name: "Neon Zone" }, label: null }] });
+const w1 = await b.patch(S, { changes: [{ row: 0, set: { name: "Level Up Arena", phone: "+91 90000 11111" }, label: "interested" }, { row: 1, set: { name: "Pixel Hub" }, label: "converted" }, { row: 3, set: { name: "Neon Zone" } }] });
 t("writes only changed rows", w1.status === 200 && w1.data.applied === 3, JSON.stringify(w1));
 const g1 = (await b.get(S)).data;
 t("reads rows back with gaps filled", g1.rows.length === 4 && g1.rows[2] && Object.keys(g1.rows[2]).length === 0 && g1.rows[0].name === "Level Up Arena", JSON.stringify(g1));
 t("labels come back keyed by row", g1.labels["0"] === "interested" && g1.labels["1"] === "converted");
 t("place stats were updated by delta", g1.stats.leads === 3 && g1.stats.outreached === 2 && g1.stats.converted === 1, JSON.stringify(g1.stats));
-await b.patch(S, { changes: [{ row: 0, cells: { name: "Level Up Arena" }, label: null }, { row: 3, cells: null, label: null }] });
+await b.patch(S, { changes: [{ row: 0, unset: ["phone"], label: null }, { row: 3, unset: ["name"] }] });
 const g2 = (await b.get(S)).data;
 t("clearing a label / deleting a row adjusts stats", g2.stats.leads === 2 && g2.stats.outreached === 1 && g2.stats.converted === 1 && g2.rows.length === 2, JSON.stringify(g2));
-t("sheet rejects absurd rows", (await b.patch(S, { changes: [{ row: 9_999_999, cells: {}, label: null }] })).status === 400);
+t("sheet rejects absurd rows", (await b.patch(S, { changes: [{ row: 9_999_999, set: { a: "b" } }] })).status === 400);
 t("admin sees campaign totals + per-member stats", await (async () => {
   const x = (await a.get("/api/bootstrap")).data.campaigns[0];
   return x.stats.totals.leads === 2 && x.stats.totals.outreached === 1 && x.stats.perMember[bb.user.id]?.outreached >= 1 && x.stats.perDay[bb.user.id].length === 14 && x.stats.perDay[bb.user.id].at(-1) >= 1;
@@ -186,7 +188,7 @@ const i1 = await scraper.post("/api/ingest", { jobId: jid, source: "googlemaps",
 t("token ingests leads through its job", i1.status === 200 && i1.data.added === 3, JSON.stringify(i1));
 const i2 = await scraper.post("/api/ingest", { jobId: jid, source: "googlemaps", items: [...items, { sourceId: "place-4", cells: { name: "New" } }] }, bearer);
 t("re-scrape dedupes: 1 new, 3 updated", i2.data.added === 1 && i2.data.updated === 3, JSON.stringify(i2.data));
-t("ingested rows land after existing rows", (await b.get(S)).data.rows.length === 2 + 4 && (await b.get(S)).data.stats.leads === 6, JSON.stringify((await b.get(S)).data.stats));
+t("ingested rows land after existing rows", (await b.get(S)).data.rows.length === 4 + 4 && (await b.get(S)).data.stats.leads === 6, JSON.stringify((await b.get(S)).data.stats));
 t("a body pointing at another sheet is refused", (await scraper.post("/api/ingest", { jobId: jid, campaignId: cid, placeId: crypto.randomUUID(), source: "googlemaps", items }, bearer)).status === 403);
 t("an outsider's token can't use my job", await (async () => { const z = new Client(); await z.signIn(`zoe+${Date.now()}@example.com`); const tk = (await z.post("/api/tokens", { name: "z" })).data.token; return (await new Client().post("/api/ingest", { jobId: jid, source: "googlemaps", items }, { authorization: `Bearer ${tk}` })).status === 404; })());
 t("a teammate's token can't use my job either", (await scraper.post("/api/ingest", { jobId: jid, source: "googlemaps", items }, { authorization: `Bearer ${bTok}` })).status === 404);
@@ -215,13 +217,13 @@ section("Deleting data: columns, rows, sheets");
   await a.post(`/api/campaigns/${ccid}/domains/${ddid}/places`, { id: ppid, name: "City" });
   const SH = `/api/campaigns/${ccid}/domains/${ddid}/places/${ppid}/sheet`, PL = `/api/campaigns/${ccid}/domains/${ddid}/places/${ppid}`;
   await a.patch(SH, { changes: [
-    { row: 0, cells: { name: "Alpha", phone: "1", website: "a.com" }, label: null },
-    { row: 1, cells: { phone: "2" }, label: null },
-    { row: 2, cells: { phone: "3" }, label: "interested" },
-    { row: 3, cells: { name: "Delta", phone: "4" }, label: null },
+    { row: 0, set: { name: "Alpha", phone: "1", website: "a.com" } },
+    { row: 1, set: { phone: "2" } },
+    { row: 2, set: { phone: "3" }, label: "interested" },
+    { row: 3, set: { name: "Delta", phone: "4" } },
   ] });
-  t("clearing every cell of a row deletes the lead from the database", (await a.patch(SH, { changes: [{ row: 3, cells: {}, label: null }] })).status === 200 && (await db.collection("leads").countDocuments({ placeId: ppid, row: 3 })) === 0);
-  t("clearing one cell removes only that value from the database", (await a.patch(SH, { changes: [{ row: 0, cells: { name: "Alpha", website: "a.com" }, label: null }] })).status === 200 && !("phone" in (await db.collection("leads").findOne({ placeId: ppid, row: 0 })).cells));
+  t("clearing every cell of a row leaves an empty row (so teammates see it vanish), not a lead", (await a.patch(SH, { changes: [{ row: 3, unset: ["name", "phone"] }] })).status === 200 && await (async () => { const l = await db.collection("leads").findOne({ placeId: ppid, row: 3 }); return !!l && Object.keys(l.cells).length === 0 && l.label === null && l.sourceId === null; })() && !(await a.get(SH)).data.rows[3]);
+  t("clearing one cell removes only that value from the database", (await a.patch(SH, { changes: [{ row: 0, unset: ["phone"] }] })).status === 200 && !("phone" in (await db.collection("leads").findOne({ placeId: ppid, row: 0 })).cells));
   const before = await db.collection("leads").countDocuments({ placeId: ppid });
   const noKey = await a.patch(PL, { dropFields: ["a.b"] });
   t("a malformed column key is refused", noKey.status === 400);
@@ -229,7 +231,8 @@ section("Deleting data: columns, rows, sheets");
   t("deleting columns succeeds and returns fresh counters", drop.status === 200 && drop.data.stats.leads === 1 && drop.data.stats.outreached === 1, JSON.stringify(drop.data));
   const left = await db.collection("leads").find({ placeId: ppid }).toArray();
   t("the column's values are gone from every lead in the database", left.every((l) => !("phone" in l.cells) && !("website" in l.cells)), JSON.stringify(left.map((l) => l.cells)));
-  t("leads left with nothing (and no label) are deleted; labelled ones are kept", left.length === 2 && left.some((l) => l.label === "interested") && left.some((l) => l.cells.name === "Alpha"), `${before} -> ${left.length}`);
+  const live = left.filter((l) => Object.keys(l.cells).length || l.label);
+  t("leads left with nothing (and no label) are emptied; labelled ones are kept", live.length === 2 && live.some((l) => l.label === "interested") && live.some((l) => l.cells.name === "Alpha"), `${before} -> ${live.length}`);
   t("other columns are untouched", left.find((l) => l.cells.name === "Alpha") !== undefined);
   t("an outsider can't delete columns", (await new Client().patch(PL, { dropFields: ["name"] })).status === 401);
   t("another campaign's member can't either (404)", (await c.patch(PL, { dropFields: ["name"] })).status === 404 || (await c.patch(PL, { dropFields: ["name"] })).status === 401);
@@ -241,7 +244,7 @@ section("Deleting data: columns, rows, sheets");
   const p2 = uuid();
   await a.post(`/api/campaigns/${ccid}/domains/${ddid}/places`, { id: p2, name: "City 2" });
   await a.post("/api/jobs", { campaignId: ccid, placeId: p2, tool: "googlemaps", input: mapsInput("y") });
-  await a.patch(`/api/campaigns/${ccid}/domains/${ddid}/places/${p2}/sheet`, { changes: [{ row: 0, cells: { name: "Z" }, label: null }] });
+  await a.patch(`/api/campaigns/${ccid}/domains/${ddid}/places/${p2}/sheet`, { changes: [{ row: 0, set: { name: "Z" } }] });
   t("deleting a domain removes its sheets, leads and jobs", (await a.del(`/api/campaigns/${ccid}/domains/${ddid}`)).status === 200 && (await db.collection("leads").countDocuments({ placeId: p2 })) === 0 && (await db.collection("jobs").countDocuments({ placeId: p2 })) === 0 && (await db.collection("places").countDocuments({ domainId: ddid })) === 0);
   t("deleting the campaign removes everything under it", (await a.del(`/api/campaigns/${ccid}`)).status === 200 && (await db.collection("leads").countDocuments({ campaignId: ccid })) === 0 && (await db.collection("domains").countDocuments({ campaignId: ccid })) === 0);
 }
@@ -284,7 +287,7 @@ section("Concurrency");
   await a.post(`/api/campaigns/${cc}/domains`, { id: dd, name: "D" });
   await a.post(`/api/campaigns/${cc}/domains/${dd}/places`, { id: pp, name: "P" });
   const SS = `/api/campaigns/${cc}/domains/${dd}/places/${pp}/sheet`;
-  const rs = await Promise.all(Array.from({ length: 40 }, (_, i) => a.patch(SS, { changes: [{ row: i, cells: { name: `r${i}` }, label: i % 2 ? "interested" : null }] })));
+  const rs = await Promise.all(Array.from({ length: 40 }, (_, i) => a.patch(SS, { changes: [{ row: i, set: { name: `r${i}` }, label: i % 2 ? "interested" : null }] })));
   t("40 parallel sheet writes all succeed", rs.every((r) => r.status === 200));
   const st = (await a.get(SS)).data;
   t("counters stay exact under concurrent writes", st.stats.leads === 40 && st.stats.outreached === 20 && st.rows.length === 40, JSON.stringify(st.stats));
@@ -303,6 +306,138 @@ section("Concurrency");
   const dbl = await Promise.all([target.post(`/api/invites/${tk}`), target.post(`/api/invites/${tk}`), target.post(`/api/invites/${tk}`)]);
   t("accepting the same invite 3x at once yields one membership", dbl.every((r) => r.status === 200) && (await db.collection("members").countDocuments({ campaignId: cc, userId: (await target.get("/api/bootstrap")).data.user.id })) === 1);
   t("one accept notification, not three", (await db.collection("notifications").countDocuments({ type: "invite_accepted", "data.campaignId": cc })) === 1);
+}
+
+section("Teammates on one sheet");
+{
+  const cid = (await a.post("/api/campaigns", { name: "Team sheet" })).data.campaign.id;
+  await a.post(`/api/campaigns/${cid}/invites`, { email: emailB });
+  const inc = (await b.get("/api/bootstrap")).data.incomingInvites.find((i) => i.campaignId === cid);
+  await b.post(`/api/invites/by-id/${inc.id}/accept`);
+  const bId = (await b.get("/api/bootstrap")).data.user.id;
+  const did = uuid(), pid = uuid();
+  await a.post(`/api/campaigns/${cid}/domains`, { id: did, name: "D" });
+  await a.post(`/api/campaigns/${cid}/domains/${did}/places`, { id: pid, name: "P" });
+  const SH = `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`, SYN = `/api/campaigns/${cid}/domains/${did}/places/${pid}/sync`;
+  const out = async (u) => (await db.collection("dailyStats").aggregate([{ $match: { campaignId: cid, userId: u } }, { $group: { _id: null, n: { $sum: "$outreached" } } }]).toArray())[0]?.n ?? 0;
+  const row = (r) => db.collection("leads").findOne({ placeId: pid, row: r });
+
+  await a.patch(SH, { changes: [{ row: 0, set: { name: "Cafe A", phone: "1" } }, { row: 1, set: { name: "Cafe B" } }] });
+  await b.patch(SH, { changes: [{ row: 0, label: "interested" }] });
+  t("a label on a row with no new cells credits the labeller", (await out(bId)) === 1);
+  // Alice's screen is behind: it has never seen Bob's label. She fixes a phone number.
+  const stale = await a.patch(SH, { changes: [{ row: 0, set: { phone: "2" } }] });
+  const g = (await b.get(SH)).data;
+  t("a stale cell edit does not wipe a teammate's label", stale.status === 200 && g.labels["0"] === "interested" && g.rows[0].phone === "2" && g.rows[0].name === "Cafe A", JSON.stringify(g));
+  t("and the teammate keeps their outreach credit and the counters hold", (await out(bId)) === 1 && g.stats.outreached === 1 && g.stats.leads === 2, JSON.stringify(g.stats));
+  await Promise.all([a.patch(SH, { changes: [{ row: 1, set: { phone: "p" } }] }), b.patch(SH, { changes: [{ row: 1, set: { email: "e@x.com" } }] })]);
+  t("two people editing different cells of one row both keep their edit", await (async () => { const r = await row(1); return r.cells.name === "Cafe B" && r.cells.phone === "p" && r.cells.email === "e@x.com"; })());
+  t("a change that changes nothing is refused", (await a.patch(SH, { changes: [{ row: 1 }] })).status === 400);
+  t("the old whole-row format is refused", (await a.patch(SH, { changes: [{ row: 1, cells: { name: "x" }, label: null }] })).status === 400);
+
+  // A scrape lands on the row number Bob was about to type into.
+  const tk = (await a.post("/api/tokens", { name: "team" })).data.token, bear = { authorization: `Bearer ${tk}` }, sc = new Client();
+  const job = (await a.post("/api/jobs", { campaignId: cid, placeId: pid, tool: "googlemaps", input: mapsInput("team") })).data.id;
+  let cl; for (let i = 0; i < 10 && cl?.data.job?.id !== job; i++) cl = await sc.post("/api/jobs/claim", {}, bear);
+  const ing = (items) => sc.post("/api/ingest", { jobId: job, source: "googlemaps", items }, bear);
+  await ing([{ sourceId: "s1", cells: { name: "Scraped 1", rating: "4.5" } }, { sourceId: "s2", cells: { name: "Scraped 2" } }]);
+  t("the scrape took rows 2 and 3", (await row(2)).sourceId === "s1" && (await row(3)).sourceId === "s2");
+  const mv = await b.patch(SH, { changes: [{ row: 2, set: { name: "Bob's own lead" }, isNew: true }] });
+  t("typing into a row a scrape just filled moves to a free row", mv.status === 200 && mv.data.moved?.length === 1 && mv.data.moved[0].from === 2 && mv.data.moved[0].to === 4, JSON.stringify(mv.data));
+  t("the scraped lead is untouched and keeps its scrape id", (await row(2)).cells.name === "Scraped 1" && (await row(2)).sourceId === "s1");
+  t("Bob's lead is on the new row", (await row(4)).cells.name === "Bob's own lead" && (await row(4)).source === "manual");
+  t("counters include the moved lead exactly once", (await b.get(SH)).data.stats.leads === 5, JSON.stringify((await b.get(SH)).data.stats));
+  t("a new row on a free number just lands there", (await b.patch(SH, { changes: [{ row: 30, set: { name: "Far" }, isNew: true }] })).data.moved.length === 0 && (await row(30)).cells.name === "Far");
+  await a.patch(SH, { changes: [{ row: 30, unset: ["name"] }] });
+  t("an emptied row can be reused by a new row", (await b.patch(SH, { changes: [{ row: 30, set: { name: "Again" }, isNew: true }] })).data.moved.length === 0 && (await row(30)).cells.name === "Again");
+
+  // Re-scrape refreshes what the scraper owns and leaves hand edits alone.
+  await a.patch(SH, { changes: [{ row: 2, set: { name: "Renamed by hand" }, unset: ["rating"] }] });
+  await ing([{ sourceId: "s1", cells: { name: "Scraped 1", rating: "4.9", phone: "999" } }]);
+  const r2 = await row(2);
+  t("a re-scrape keeps cells people edited or cleared", r2.cells.name === "Renamed by hand" && !("rating" in r2.cells), JSON.stringify(r2.cells));
+  t("and still fills in new columns", r2.cells.phone === "999");
+
+  // Live sync carries labels and deletions.
+  const since = Date.now() - 60_000;
+  await a.patch(SH, { changes: [{ row: 1, unset: ["name", "phone", "email"] }] });
+  const sy = (await b.get(`${SYN}?since=${since}`)).data;
+  t("sync includes labels", sy.rows.find((x) => x.row === 0)?.label === "interested", JSON.stringify(sy.rows.map((x) => [x.row, x.label])));
+  t("sync tells teammates a row was emptied", sy.rows.find((x) => x.row === 1) && Object.keys(sy.rows.find((x) => x.row === 1).cells).length === 0);
+  const lastRow = sy.cursor;
+  const page = (await b.get(`${SYN}?since=${lastRow.at}&afterRow=${lastRow.row}`)).data;
+  t("paging by (time,row) does not repeat the last row", page.rows.length === 0, JSON.stringify(page.rows));
+
+  // Counters repair themselves.
+  await db.collection("places").updateOne({ _id: pid }, { $set: { stats: { leads: 99, outreached: 99, converted: 99 } } });
+  const healed = (await a.get(SH)).data.stats;
+  t("opening a sheet repairs drifted counters", healed.leads === 5 && healed.outreached === 1 && healed.converted === 0, JSON.stringify(healed));
+  t("and writes the true numbers back", (await db.collection("places").findOne({ _id: pid })).stats.outreached === 1 && (await db.collection("places").findOne({ _id: pid })).stats.leads === healed.leads);
+
+  // Deleting a sheet takes the outreach credit back from the people who earned it.
+  const p2 = uuid();
+  await a.post(`/api/campaigns/${cid}/domains/${did}/places`, { id: p2, name: "P2" });
+  await b.patch(`/api/campaigns/${cid}/domains/${did}/places/${p2}/sheet`, { changes: [{ row: 0, set: { name: "x" }, label: "interested" }, { row: 1, set: { name: "y" }, label: "converted" }] });
+  const beforeDel = await out(bId);
+  await a.del(`/api/campaigns/${cid}/domains/${did}/places/${p2}`);
+  t("deleting a sheet subtracts its outreach from the people's numbers", beforeDel - (await out(bId)) === 2, `${beforeDel} -> ${await out(bId)}`);
+
+  // Changing which labels count as outreach fixes the numbers.
+  const tree = { id: "root", name: "Root", children: [{ id: "interested", name: "Didn't pick" }] };
+  await a.patch(`/api/campaigns/${cid}`, { labelTree: tree });
+  let ok = false;
+  for (let i = 0; i < 25 && !ok; i++) { await new Promise((r) => setTimeout(r, 200)); ok = (await db.collection("places").findOne({ _id: pid })).stats.outreached === 0 && (await out(bId)) === 0; }
+  t("making a label stop counting as outreach rebuilds counters and takes the credit back", ok, JSON.stringify({ stats: (await db.collection("places").findOne({ _id: pid })).stats, b: await out(bId) }));
+  t("an admin can run the repair by hand", (await a.post(`/api/campaigns/${cid}/repair`)).status === 200 && (await b.post(`/api/campaigns/${cid}/repair`)).status === 403);
+  await a.del(`/api/campaigns/${cid}`);
+}
+
+section("Hardening: jobs, addresses, invite links, big deletes");
+{
+  const cid = (await a.post("/api/campaigns", { name: "Hardening" })).data.campaign.id;
+  const inv = await a.post(`/api/campaigns/${cid}/invites`, { email: emailB });
+  t("invite link is stored encrypted, never in plain text", await (async () => { const i = await db.collection("invites").findOne({ _id: inv.data.invite.id }); return !!i.tokenEnc && !("token" in i) && !JSON.stringify(i).includes(inv.data.devLink.split("/invite/")[1]); })());
+  t("admins can still copy the link (it decrypts to the emailed one)", (await a.get("/api/bootstrap")).data.campaigns.find((c) => c.id === cid).invites[0].link === inv.data.devLink);
+  const incoming = (await b.get("/api/bootstrap")).data.incomingInvites.find((i) => i.campaignId === cid);
+  await b.post(`/api/invites/by-id/${incoming.id}/accept`);
+  t("accepting drops the stored link", !(await db.collection("invites").findOne({ _id: inv.data.invite.id })).tokenEnc);
+  const did = uuid(), pid = uuid();
+  await a.post(`/api/campaigns/${cid}/domains`, { id: did, name: "D" });
+  await a.post(`/api/campaigns/${cid}/domains/${did}/places`, { id: pid, name: "P" });
+
+  // A queued job nobody picked up must not block the sheet forever.
+  const j1 = await b.post("/api/jobs", { campaignId: cid, placeId: pid, tool: "googlemaps", input: mapsInput("one") });
+  t("a member queues a scrape", j1.status === 201);
+  t("signed-out callers can't cancel it", (await new Client().patch(`/api/jobs/${j1.data.id}`, { status: "cancelled" })).status === 401);
+  const x = new Client(); await x.signIn(`x+${Date.now()}@example.com`);
+  t("a stranger can't cancel it (404, as if it didn't exist)", (await x.patch(`/api/jobs/${j1.data.id}`, { status: "cancelled" })).status === 404);
+  t("a job for a sheet outside the campaign is refused", await (async () => { const j = await a.post("/api/jobs", { campaignId: cid, placeId: uuid(), tool: "googlemaps", input: mapsInput("x") }); return j.status === 404; })());
+  t("the owner (admin) can cancel a member's job", (await a.patch(`/api/jobs/${j1.data.id}`, { status: "cancelled" })).data.status === "cancelled");
+  const j2 = await b.post("/api/jobs", { campaignId: cid, placeId: pid, tool: "googlemaps", input: mapsInput("two") });
+  t("then the sheet is free again", j2.status === 201);
+  t("an admin may only stop it, not rewrite it", (await a.patch(`/api/jobs/${j2.data.id}`, { progress: 0.9 })).status === 403);
+  await db.collection("jobs").updateOne({ _id: j2.data.id }, { $set: { createdAt: new Date(Date.now() - 45 * 60_000) } });
+  const j3 = await a.post("/api/jobs", { campaignId: cid, placeId: pid, tool: "googlemaps", input: mapsInput("three") });
+  t("a job nobody claimed for 30 minutes is given up on", j3.status === 201 && (await db.collection("jobs").findOne({ _id: j2.data.id })).status === "failed", JSON.stringify(j3.data));
+  await a.patch(`/api/jobs/${j3.data.id}`, { status: "cancelled" });
+
+  // Addresses for rate limits come from the trusted end of x-forwarded-for.
+  const spoof = (n) => new Client().req("POST", "/api/auth/email", { email: `spoof${n}+${Date.now()}@example.com` }, { "x-forwarded-for": `${n}.${n}.${n}.${n}, 7.7.7.7` });
+  let blocked = 0; for (let i = 1; i <= 22; i++) if ((await spoof(i)).status === 429) blocked++;
+  t("a made-up first address doesn't dodge the per-address limit", blocked >= 1, `${blocked} blocked`);
+  const victim = `victim+${Date.now()}@example.com`;
+  const vs = []; for (let i = 0; i < 8; i++) vs.push((await new Client().req("POST", "/api/auth/email", { email: victim }, { "x-forwarded-for": "6.6.6.6" })).status);
+  t("a stranger can't use up someone else's sign-in attempts", vs.includes(429) && (await new Client().req("POST", "/api/auth/email", { email: victim }, { "x-forwarded-for": "5.5.5.5" })).status === 200, JSON.stringify(vs));
+
+  // Save size and big deletes.
+  const SH = `/api/campaigns/${cid}/domains/${did}/places/${pid}/sheet`;
+  t("a save of more than 2,000 rows is refused (the browser sends 2,000 at a time)", (await a.patch(SH, { changes: Array.from({ length: 2001 }, (_, i) => ({ row: i, set: { n: "x" } })) })).status === 400);
+  for (let k = 0; k < 7; k++) await a.patch(SH, { changes: Array.from({ length: 2000 }, (_, i) => ({ row: k * 2000 + i, set: { n: `r${k * 2000 + i}` }, ...(i % 4 === 0 ? { label: "interested" } : {}) })) });
+  t("a 14,000-row sheet saved", (await db.collection("leads").countDocuments({ placeId: pid })) === 14000);
+  const t0 = Date.now();
+  t("deleting the sheet removes every lead (in slices)", (await a.del(`/api/campaigns/${cid}/domains/${did}/places/${pid}`)).status === 200 && (await db.collection("leads").countDocuments({ placeId: pid })) === 0, `${Date.now() - t0} ms`);
+  t("and gives the outreach credit back", (await db.collection("dailyStats").aggregate([{ $match: { campaignId: cid } }, { $group: { _id: null, n: { $sum: "$outreached" } } }]).toArray())[0]?.n === 0);
+  t("deleting the campaign still works", (await a.del(`/api/campaigns/${cid}`)).status === 200);
 }
 
 section("Reliability: dead workers, oversized bodies, health");

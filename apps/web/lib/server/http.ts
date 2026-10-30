@@ -16,8 +16,15 @@ export const conflict = (m: string) => new HttpError(409, m, "conflict");
 
 export const ok = <T>(data: T, init?: ResponseInit) => NextResponse.json(data, init);
 
-export const clientIp = (req: NextRequest) =>
-  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+/**
+ * The caller's address for rate limits. A client can put anything at the START of x-forwarded-for; only the entries our own
+ * proxy appended (the END) can be trusted, so the address is taken `proxyHops` entries from the right.
+ */
+export const clientIp = (req: NextRequest) => {
+  const chain = req.headers.get("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  if (chain.length) return chain[Math.max(0, chain.length - env.proxyHops)];
+  return req.headers.get("x-real-ip") || null;
+};
 
 /** Mutating requests must come from our own pages. SameSite=Lax cookies are the first line; this is the second. */
 function checkOrigin(req: NextRequest) {

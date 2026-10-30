@@ -36,7 +36,7 @@ export async function ensureIndexes() {
       { key: { placeId: 1, row: 1 }, unique: true },
       // Re-scrapes of the same business must not create duplicates.
       { key: { placeId: 1, source: 1, sourceId: 1 }, unique: true, partialFilterExpression: { sourceId: { $type: "string" } } },
-      { key: { placeId: 1, updatedAt: 1 } }, // live sync: "rows changed since..." for one sheet
+      { key: { placeId: 1, updatedAt: 1, row: 1 } }, // live sync: "rows changed since..." for one sheet, paged by (updatedAt, row)
     ]),
     c("notifications").createIndexes([
       { key: { userId: 1, createdAt: -1 } },
@@ -57,6 +57,7 @@ export async function ensureIndexes() {
   await Promise.all(
     [
       ["leads", "campaignId_1_label_1"],
+      ["leads", "placeId_1_updatedAt_1"], // replaced by the (placeId, updatedAt, row) index
       ["authTokens", "email_1_createdAt_-1"],
     ].map(([coll, name]) => c(coll).dropIndex(name).catch(() => undefined)),
   );

@@ -39,7 +39,7 @@ All ids are strings. The browser mints UUIDs itself so the screen updates instan
 | `invites` | `campaignId`, `email`, `role`, `tokenHash`, `invitedBy`, `status` (pending/accepted/revoked), `expiresAt` (14 days) | history kept |
 | `domains` | a niche in a campaign: `name`, `image`, `position` | permanent |
 | `places` | a city in a domain = one sheet: `scrape` config, `view`, `position`, **`stats {leads, outreached, converted}`** | permanent |
-| `leads` | one sheet row: `placeId`, `row`, `cells{}`, `label`, `source`, `sourceId`, `updatedBy`, **`outreachedBy`, `outreachedAt`, `outreachedDay`** | permanent |
+| `leads` | one sheet row: `placeId`, `row`, `cells{}`, `label`, `source`, `sourceId`, `updatedBy`, `edited[]` (cell keys a person typed or cleared; a re-scrape never overwrites them), **`outreachedBy`, `outreachedAt`, `outreachedDay`** | permanent |
 | `dailyStats` | `_id`=`campaignId:userId:day`; `outreached`, `converted`, `leads` | permanent, one doc per person per campaign per day |
 | `notifications` | `userId`, `type`, `title`, `body`, `data{}`, `readAt` | TTL 6 months |
 | `emails` | outbox: `to`, `subject`, `html`, `text`, `status`, `attempts`, `nextAttemptAt` | sent rows TTL 30 days |
@@ -56,7 +56,7 @@ Every query is index-backed. They are all in `packages/db/src/indexes.ts`; the i
 * `users.email` unique; `users.googleId` partial-unique.
 * `members (campaignId,userId)` unique and `members (userId)` ("which campaigns am I in").
 * `invites.tokenHash` unique; `invites (campaignId,email)` partial-unique where `status:"pending"` (one open invite per person); `invites (email,status)`.
-* `leads (placeId,row)` unique; `leads (placeId,source,sourceId)` partial-unique (scrape dedupe); `leads (placeId,updatedAt)` (live sync); `leads (campaignId,label)`.
+* `leads (placeId,row)` unique; `leads (placeId,source,sourceId)` partial-unique (scrape dedupe); `leads (placeId,updatedAt,row)` (live sync, paged by time then row); `leads (campaignId,label)`.
 * `dailyStats (campaignId,day)` and `(campaignId,userId,day)`.
 * Removed as unused (they only added a write to every row change): `leads (campaignId,label)` and `authTokens (email,createdAt)`. `ensureIndexes` drops them on boot. Campaign delete now removes leads by `placeId`, so no campaign-first index on `leads` is needed.
 * TTL indexes on `sessions`, `authTokens`, `oauthStates`, `rateLimits`, `notifications`, sent `emails`: Mongo cleans these itself, no job needed.
@@ -121,7 +121,8 @@ cannot manage the account.
 | `POST/GET /api/campaigns`, `PATCH/DELETE /api/campaigns/:id` | campaigns (PATCH also saves `labelTree`) |
 | `…/domains`, `…/domains/:did`, `…/places`, `…/places/:pid` | domains and places |
 | `GET/PATCH …/places/:pid/sheet` | read a sheet; save changed rows (returns `{applied, today}`) |
-| `GET …/places/:pid/sync` | live pull of rows a running scrape has added |
+| `GET …/places/:pid/sync` | live pull of every row (cells **and label**) changed since a cursor, for any open sheet: teammates' edits, labels and scrape results. Paged by `(updatedAt,row)` |
+| `POST /api/campaigns/:id/repair` | admin: rebuild every sheet's counters from its rows and take back outreach credit that no longer applies |
 | `POST /api/campaigns/:id/invites`, `DELETE …/invites/:inviteId` | invite / revoke (50 per person per day) |
 | `PATCH/DELETE …/members/:userId` | change role / remove / leave |
 | `GET/POST /api/invites/:token`, `POST /api/invites/by-id/:id/accept|decline` | invite pages and the bell |
@@ -132,7 +133,7 @@ cannot manage the account.
 | `POST /api/internal/outbox` | cron drains the email outbox (`x-cron-secret`) |
 
 **Rate limits (shared across instances, in Mongo):** sign-in email 5 / 15 min per address and 20 / h per IP · verify 60 / 15 min ·
-sheet save 600 / min per user · live sync 120 / min · ingest 240 / min · job claim 60 / min · job create 60 / h · campaign create 30 / h · invites 50 / day · invite accept 30 / 15 min.
+sheet save 600 / min per user · live sync 240 / min · ingest 240 / min · job claim 60 / min · job create 60 / h · campaign create 30 / h · invites 50 / day · invite accept 30 / 15 min.
 **Size limits:** ≤200 domains/campaign, ≤500 places/domain, ≤100 campaigns/user, ≤5,000 rows per save, ≤1,000 leads per ingest.
 
 ## 6b. Reliability and operations
@@ -166,7 +167,7 @@ sheet save 600 / min per user · live sync 120 / min · ingest 240 / min · job 
 | --- | --- | --- |
 | Workspace refresh (`/api/bootstrap`) | every 2 min while the tab is visible, on tab focus (≥30 s apart), and ≤ every 10 s after outreach changes | ~10 indexed queries |
 | Notification bell | every 30 s while visible | 1 indexed query |
-| Scrape bar (`…/sync`) | every 2 s while a scrape runs, 15 s otherwise, per open sheet | a few indexed queries |
+| Live sync (`…/sync`) | every 2 s while a scrape runs, 5 s otherwise, per open sheet (only while the tab is visible) | a few indexed queries |
 | Scraper status check | every 5 s | none (calls the local scraper app, not the database) |
 
 There is deliberately **no presence / "last active" heartbeat**: it was removed to save database load.
@@ -184,3 +185,21 @@ node scripts/load.mjs  # 500-user simulation
 
 Known gaps worth remembering: counts recorded before the `outreachedBy` claim existed are not rebuilt (per-person daily history can't be
 reconstructed, place totals can via `recount`); the chart updates for teammates within about 2 minutes, not instantly.
+
+## Teammates on one sheet (how edits merge)
+
+* **Edits are per field.** `PATCH …/sheet` takes `{row, set?, unset?, label?, isNew?}`: only the cells and label the person changed.
+  A screen that is behind can never put an old label or an old cell value back. (The old whole-row format is refused with a 400.)
+* **Live sync carries labels and deletions.** The browser keeps what the server is known to hold (`baseRows`/`baseLabels`) and merges
+  incoming rows key by key; unsaved local typing wins for those keys only (`apps/web/lib/sheet-merge.ts`, unit-tested).
+* **A row emptied of cells and label stays as an empty row** (no scrape id, nothing counted) so teammates see it vanish and the number can be reused.
+* **New rows are inserted, never upserted.** The unique `(placeId,row)` index is the lock. If a scrape or teammate took that row number,
+  the person's data goes to the next free row and the response lists it in `moved`; the browser follows it. A retry of a save whose answer was lost is recognised and is not treated as a collision.
+* **Re-scrapes** refresh only cells nobody edited by hand (`leads.edited`).
+* **Counters** move per row and are flushed even if a request dies halfway; opening a sheet compares the stored counters with the rows and repairs them;
+  changing which labels count as outreach, or deleting a sheet/domain, adjusts people's daily numbers too.
+* **The sheet UI is virtualised** (only the rows on screen are in the page), so 1,500+ rows stay fast.
+* **Jobs can't wedge a sheet:** a running job whose worker went silent is failed after 3 min, a queued job nobody claimed after 30 min, and any campaign admin can stop anybody's job.
+* **Big deletes** (sheet, domain, campaign) remove leads in slices of 5,000 and can be repeated if cut off; saves are capped at 2,000 rows per request; heavy routes ask the host for up to 60 s (`maxDuration`).
+* **Invite links** are stored AES-GCM encrypted (`invites.tokenEnc`, key from `APP_SECRET`); the emailed token itself is only ever stored as a hash.
+* Tests: `pnpm e2e` (API), `pnpm test:merge` (merge rules), `pnpm e2e:browser` (two real browsers on one sheet).
