@@ -64,14 +64,19 @@ export const allFields = fieldGroups.flatMap((g) => g.fields);
  */
 export const SUMMARY_KEY = "callSummary";
 export const summaryField: Field = { key: SUMMARY_KEY, label: "Call summary" };
-export const fieldByKey = (key: string) => (key === SUMMARY_KEY ? summaryField : allFields.find((f) => f.key === key));
+/** ATC = "asked to callback": the day a client said to call back, plus a note. Also a default column, 3rd after Label and Call summary. */
+export const ATC_KEY = "atc";
+export const atcField: Field = { key: ATC_KEY, label: "ATC" };
+export const fieldByKey = (key: string) => (key === SUMMARY_KEY ? summaryField : key === ATC_KEY ? atcField : allFields.find((f) => f.key === key));
 
-/** The data columns of a sheet, in the saved order. A column the person has never placed goes to its default spot: the call summary right after Label (the 2nd column), anything else at the end. */
+/** The data columns of a sheet, in the saved order. A column the person has never placed goes to its default spot: the call summary right after Label (2nd column), ATC right after the call summary (3rd), anything else at the end. */
 export function sheetKeys(cfg: { fields: string[] } | undefined, blank: string[], saved: string[] = []): string[] {
   const catalog = fieldGroups.flatMap((g) => g.fields.map((f) => f.key));
-  const base = [SUMMARY_KEY, ...(cfg ? catalog.filter((k) => cfg.fields.includes(k)) : blank)];
+  const base = [SUMMARY_KEY, ATC_KEY, ...(cfg ? catalog.filter((k) => cfg.fields.includes(k)) : blank)];
   const fresh = base.filter((k) => !saved.includes(k));
-  return [...fresh.filter((k) => k === SUMMARY_KEY), ...saved.filter((k) => base.includes(k)), ...fresh.filter((k) => k !== SUMMARY_KEY)];
+  const out = [...fresh.filter((k) => k === SUMMARY_KEY), ...saved.filter((k) => base.includes(k)), ...fresh.filter((k) => k !== SUMMARY_KEY && k !== ATC_KEY)];
+  if (fresh.includes(ATC_KEY)) out.splice(out.indexOf(SUMMARY_KEY) + 1, 0, ATC_KEY);
+  return out;
 }
 
 export type ScrapeConfig = {

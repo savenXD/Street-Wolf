@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Plus, Search, X } from "lucide-react";
+import { Check, History, Plus, Search, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,105 @@ function Label({ children }: { children: React.ReactNode }) {
   return <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-neutral-400">{children}</p>;
 }
 
+type Past = { q: string; at: number; status: string; leads: number | null };
+type Run = { id: string; at: number; status: string; leads: number; config: ScrapeConfig };
+
+const filterSummary = (c: ScrapeConfig) => {
+  const f = c.filters;
+  const parts = [c.limit === "all" ? "all results" : `${c.limit} per search`];
+  if (f?.minRating) parts.push(`rating ≥ ${f.minRating}`);
+  if (f?.minReviews) parts.push(`reviews ≥ ${f.minReviews}`);
+  if (f?.website === "has") parts.push("has website");
+  if (f?.website === "none") parts.push("no website");
+  if (f?.mustHavePhone) parts.push("phone required");
+  if (f?.skipClosed) parts.push("skip closed");
+  if (f?.exclude?.length) parts.push(`excludes ${f.exclude.join(", ")}`);
+  if (c.fields?.length) parts.push(`${c.fields.length} columns`);
+  return parts.join(" · ");
+};
+
+const ago = (t: number) => {
+  const d = Math.floor((Date.now() - t) / 86_400_000);
+  return d <= 0 ? "today" : d === 1 ? "yesterday" : d < 30 ? `${d} days ago` : new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
+
+/** Searches already run on this sheet (from its finished scrape jobs), each one tap to add back. */
+function PastQueries({ path, current, onAdd, onReuse }: { path: string; current: string[]; onAdd: (q: string) => void; onReuse: (c: ScrapeConfig) => void }) {
+  const [past, setPast] = useState<Past[] | null>(null);
+  const [runs, setRuns] = useState<Run[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetch(path)
+      .then((r) => (r.ok ? r.json() : { queries: [] }))
+      .then((d: { queries: Past[]; runs?: Run[] }) => {
+        if (!live) return;
+        setPast(d.queries);
+        setRuns(d.runs ?? []);
+      })
+      .catch(() => live && setPast([]));
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  const have = new Set(current.map((x) => x.toLowerCase()));
+  return (
+    <div className="mt-6 rounded-2xl border border-neutral-200 bg-neutral-50 p-3.5">
+      <p className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-neutral-500 uppercase">
+        <History className="size-3.5" /> Already searched on this sheet
+      </p>
+      {past === null ? (
+        <div className="mt-3 space-y-2">
+          {[0, 1].map((i) => <div key={i} className="h-8 animate-pulse rounded-lg bg-neutral-200/60" />)}
+        </div>
+      ) : past.length === 0 ? (
+        <p className="mt-2 text-sm text-neutral-400">Nothing has been scraped here yet. Searches you run will be kept in this list.</p>
+      ) : (
+        <ul className="mt-2 max-h-56 divide-y divide-neutral-200 overflow-y-auto">
+          {past.map((p) => (
+            <li key={p.q} className="flex items-center gap-3 py-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{p.q}</span>
+                <span className="text-xs text-neutral-400">
+                  {ago(p.at)}
+                  {p.leads !== null && p.leads > 0 && ` · ${p.leads} leads`}
+                  {p.status !== "done" && ` · ${p.status === "cancelled" ? "stopped" : "failed"}`}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onAdd(p.q)}
+                disabled={have.has(p.q.toLowerCase())}
+                className="shrink-0 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-600 hover:border-neutral-950 hover:text-neutral-950 disabled:border-transparent disabled:bg-transparent disabled:text-neutral-400"
+              >
+                {have.has(p.q.toLowerCase()) ? "In setup" : "Search again"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {runs.length > 0 && (
+        <>
+          <p className="mt-4 text-xs font-medium tracking-wide text-neutral-500 uppercase">Past runs and their settings</p>
+          <ul className="mt-1 max-h-64 divide-y divide-neutral-200 overflow-y-auto">
+            {runs.map((r) => (
+              <li key={r.id} className="py-2 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1 text-xs text-neutral-400">
+                    {ago(r.at)} · {r.leads} leads{r.status !== "done" && ` · ${r.status === "cancelled" ? "stopped" : "failed"}`}
+                  </span>
+                  <button type="button" onClick={() => onReuse(r.config)} className="shrink-0 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-600 hover:border-neutral-950 hover:text-neutral-950">Use these settings</button>
+                </div>
+                <p className="mt-1 font-medium">{r.config.queries.join(" · ")}</p>
+                <p className="text-xs text-neutral-500">{filterSummary(r.config)}</p>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 const inputCls = "h-9 rounded-xl border border-neutral-300 px-3 text-sm outline-none focus:border-neutral-950";
 
 export function ScrapeDrawer({
@@ -57,6 +156,7 @@ export function ScrapeDrawer({
   domain,
   city,
   initial,
+  historyPath,
   onSet,
   onChange,
 }: {
@@ -64,6 +164,8 @@ export function ScrapeDrawer({
   domain: string;
   city: string;
   initial?: ScrapeConfig;
+  /** API path that lists the searches already run on this sheet. */
+  historyPath?: string;
   onSet: (c: ScrapeConfig) => void;
   /** Called on every valid edit so closing the drawer never loses changes. */
   onChange?: (c: ScrapeConfig) => void;
@@ -125,6 +227,7 @@ export function ScrapeDrawer({
                     <button key={s} onClick={() => addQuery(s)} className="rounded-full border border-dashed border-neutral-300 px-3 py-1 text-sm text-neutral-500 hover:border-neutral-950 hover:text-neutral-950">+ {s}</button>
                   ))}
                 </div>
+                {historyPath && <PastQueries path={historyPath} current={cfg.queries} onAdd={addQuery} onReuse={(c) => setCfg((x) => ({ ...x, ...c, filters: { ...x.filters, ...c.filters }, fields: c.fields?.length ? c.fields : x.fields }))} />}
               </>
     ),
     1: (

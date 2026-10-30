@@ -335,7 +335,8 @@ export async function readSheet(placeId: string, skip: Set<string> = new Set(["n
 
 /**
  * Append scraped leads (from the local scraper or a future Instagram/Reddit tool). Deduped on (source, sourceId),
- * so re-running a scrape updates rows instead of duplicating them. Returns how many were new.
+ * so re-running a scrape updates rows instead of duplicating them, and a business already on another city's sheet in the same
+ * niche (domain) is skipped. Returns how many were new, updated and skipped.
  */
 export async function ingestLeads(p: { campaignId: string; placeId: string; userId: string; source: Platform; items: { sourceId: string; cells: Record<string, string> }[] }) {
   // A person typing into the row just below the data can claim the row number we were about to use (the unique
@@ -352,20 +353,43 @@ export async function ingestLeads(p: { campaignId: string; placeId: string; user
   }
 }
 
+/** The other sheets (cities) in this sheet's niche. A business belongs to one of them, never two. */
+export async function siblingPlaceIds(campaignId: string, placeId: string): Promise<string[]> {
+  const places = await col("places");
+  const me = await places.findOne({ _id: placeId, campaignId }, { projection: { domainId: 1 } });
+  if (!me) return [];
+  return (await places.find({ campaignId, domainId: me.domainId, _id: { $ne: placeId } }, { projection: { _id: 1 } }).toArray()).map((x) => x._id);
+}
+
 async function ingestOnce(p: { campaignId: string; placeId: string; userId: string; source: Platform; items: { sourceId: string; cells: Record<string, string> }[] }) {
   const leads = await leadsCol();
   const known = new Map(
-    (await leads.find({ placeId: p.placeId, source: p.source, sourceId: { $in: p.items.map((i) => i.sourceId) } }, { projection: { sourceId: 1, edited: 1 } }).toArray()).map((l) => [l.sourceId as string, new Set(l.edited ?? [])]),
+    (await leads.find({ placeId: p.placeId, source: p.source, sourceId: { $in: p.items.map((i) => i.sourceId), $type: "string" } }, { projection: { sourceId: 1, edited: 1 } }).toArray()).map((l) => [l.sourceId as string, new Set(l.edited ?? [])]),
+  );
+  // Both lookups say `$type: "string"` on purpose: that is what lets MongoDB use the (place, source, sourceId) index, which only holds string ids.
+  // Without it the query walks every lead on the sheet(s) for each batch (measured: ~150 ms and 95,000 documents read vs ~3 ms and none).
+  // A business already on another city's sheet in this niche is not added again. (Not atomic across two scrapes running at the
+  // same moment on different cities; the scrape that reaches the business first wins, the rest see it and skip.)
+  const siblings = await siblingPlaceIds(p.campaignId, p.placeId);
+  const elsewhere = new Set<string>(
+    siblings.length
+      ? (await leads.find({ placeId: { $in: siblings }, source: p.source, sourceId: { $in: p.items.map((i) => i.sourceId).filter((id) => !known.has(id)), $type: "string" } }, { projection: { sourceId: 1 } }).toArray()).map((l) => l.sourceId as string)
+      : [],
   );
   const last = await leads.find({ placeId: p.placeId }, { projection: { row: 1 } }).sort({ row: -1 }).limit(1).next();
   let next = (last?.row ?? -1) + 1;
   const now = new Date();
   const ops: Parameters<typeof leads.bulkWrite>[0][number][] = [];
   let added = 0;
+  let skipped = 0;
   const seen = new Set<string>();
   for (const it of p.items) {
     if (seen.has(it.sourceId)) continue; // duplicate inside the same batch
     seen.add(it.sourceId);
+    if (elsewhere.has(it.sourceId)) {
+      skipped++;
+      continue;
+    }
     const edited = known.get(it.sourceId);
     if (edited) {
       // Refresh what the scraper owns. A cell a person typed or cleared by hand stays exactly as they left it.
@@ -383,5 +407,5 @@ async function ingestOnce(p: { campaignId: string; placeId: string; userId: stri
     await (await col("places")).updateOne({ _id: p.placeId }, { $inc: { "stats.leads": added }, $set: { updatedAt: now } });
     await bumpDaily(p.campaignId, p.userId, { leads: added, outreached: 0, converted: 0 });
   }
-  return { added, updated: ops.length - added };
+  return { added, updated: ops.length - added, skipped };
 }

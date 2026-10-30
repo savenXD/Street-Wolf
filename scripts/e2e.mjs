@@ -193,6 +193,33 @@ t("a body pointing at another sheet is refused", (await scraper.post("/api/inges
 t("an outsider's token can't use my job", await (async () => { const z = new Client(); await z.signIn(`zoe+${Date.now()}@example.com`); const tk = (await z.post("/api/tokens", { name: "z" })).data.token; return (await new Client().post("/api/ingest", { jobId: jid, source: "googlemaps", items }, { authorization: `Bearer ${tk}` })).status === 404; })());
 t("a teammate's token can't use my job either", (await scraper.post("/api/ingest", { jobId: jid, source: "googlemaps", items }, { authorization: `Bearer ${bTok}` })).status === 404);
 t("known ids list what's already on the sheet", (await scraper.get(`/api/ingest/known?jobId=${jid}`, bearer)).data.ids.length === 4);
+{ // one business is on one city's sheet per niche; another niche may still have it
+  const p2 = uuid();
+  await a.post(`/api/campaigns/${cid}/domains/${did}/places`, { id: p2, name: "Gurgaon" });
+  const j2 = await a.post("/api/jobs", { campaignId: cid, placeId: p2, tool: "googlemaps", input: mapsInput("cafes gurgaon") });
+  const c2 = await scraper.post("/api/jobs/claim", {}, bearer);
+  t("a second city in the niche gets its own job", j2.status === 201 && c2.data.job?.id === j2.data.id);
+  const k2 = await scraper.get(`/api/ingest/known?jobId=${j2.data.id}`, bearer);
+  t("known ids include the niche's other cities", k2.data.ids.includes("place-1") && k2.data.ids.includes("place-4"), JSON.stringify(k2.data));
+  const x = await scraper.post("/api/ingest", { jobId: j2.data.id, source: "googlemaps", items: [{ sourceId: "place-1", cells: { name: "Border cafe" } }, { sourceId: "place-99", cells: { name: "Only in Gurgaon" } }] }, bearer);
+  t("a business already in another city is skipped, the new one added", x.data.added === 1 && x.data.skipped === 1 && x.data.updated === 0, JSON.stringify(x.data));
+  const rows2 = (await a.get(`/api/campaigns/${cid}/domains/${did}/places/${p2}/sheet`)).data;
+  t("the second city's sheet holds only the new business", rows2.rows.filter((r) => Object.keys(r).length).length === 1 && rows2.stats.leads === 1, JSON.stringify(rows2.stats));
+  await scraper.patch(`/api/jobs/${j2.data.id}`, { status: "done", progress: 1, leadsFound: 1 }, bearer);
+  const hist = await a.get(`/api/campaigns/${cid}/domains/${did}/places/${p2}/queries`);
+  t("a sheet lists the searches already run on it", hist.status === 200 && hist.data.queries.length === 1 && hist.data.queries[0].q === "cafes gurgaon" && hist.data.queries[0].leads === 1 && hist.data.queries[0].status === "done", JSON.stringify(hist.data));
+  t("a teammate sees the same history", (await b.get(`/api/campaigns/${cid}/domains/${did}/places/${p2}/queries`)).data.queries.length === 1);
+  t("history is not readable across campaigns", (await new Client().get(`/api/campaigns/${cid}/domains/${did}/places/${p2}/queries`)).status === 401);
+  const d2 = uuid();
+  await a.post(`/api/campaigns/${cid}/domains`, { id: d2, name: "Gyms" });
+  const p3 = uuid();
+  await a.post(`/api/campaigns/${cid}/domains/${d2}/places`, { id: p3, name: "Delhi NCR" });
+  const j3 = await a.post("/api/jobs", { campaignId: cid, placeId: p3, tool: "googlemaps", input: mapsInput("gyms") });
+  const c3 = await scraper.post("/api/jobs/claim", {}, bearer);
+  const y = await scraper.post("/api/ingest", { jobId: j3.data.id, source: "googlemaps", items: [{ sourceId: "place-1", cells: { name: "Same place, other niche" } }] }, bearer);
+  t("a different niche may still hold the same business", c3.data.job?.id === j3.data.id && y.data.added === 1 && y.data.skipped === 0, JSON.stringify(y.data));
+  await scraper.patch(`/api/jobs/${j3.data.id}`, { status: "done", progress: 1, leadsFound: 1 }, bearer);
+}
 const SY = `/api/campaigns/${cid}/domains/${did}/places/${pid}/sync`;
 const sy = await b.get(`${SY}?since=0`);
 t("a member sees the job and its rows live", sy.status === 200 && sy.data.job?.status === "running" && sy.data.rows.length >= 4 && typeof sy.data.now === "number", JSON.stringify(sy.data.job));

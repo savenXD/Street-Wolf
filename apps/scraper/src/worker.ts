@@ -57,7 +57,7 @@ async function runJob(api: Api, job: Job) {
   try {
     const { cfg, location } = parseInput(job);
     const known = cfg.filters.skipScraped ? await api.known(job.id) : new Set<string>();
-    if (known.size) say(`${known.size} businesses are already on this sheet and will be skipped`);
+    if (known.size) say(`${known.size} businesses are already in this niche (this sheet or another city) and will be skipped`);
     await run(cfg, location, hooks, loadSettings(), known);
     await api.patch(job.id, { status: "done", progress: 1, leadsFound: found });
     say(`Job finished with ${found} leads`);

@@ -10,9 +10,11 @@ import { PamphletsSheet } from "@/components/mobile/pamphlets-sheet";
 import { Sheet } from "@/components/mobile/sheet";
 import { LoadBar } from "@/components/ui/load-bar";
 import { defaultTree, labelById, type LabelNode } from "@/lib/labels";
-import { fieldByKey, SUMMARY_KEY, sheetKeys } from "@/lib/maps-fields";
+import { ATC_KEY, fieldByKey, SUMMARY_KEY, sheetKeys } from "@/lib/maps-fields";
 import { CallSummaryDialog } from "@/components/dashboard/call-summary-dialog";
 import { previewSummary } from "@/lib/call-summary";
+import { AtcDialog } from "@/components/dashboard/atc-dialog";
+import { isOverdue, previewAtc } from "@/lib/atc";
 import { parsePhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { useSaveState, useWorkspace } from "@/lib/workspace";
@@ -62,6 +64,7 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
   // Pamphlets: opened for one lead (r), or as the plain library from the top bar (-1).
   const [pam, setPam] = useState<number | null>(null);
   const [note, setNote] = useState<number | null>(null);
+  const [atc, setAtc] = useState<number | null>(null);
 
   const rows = useMemo(() => city.rows ?? [], [city.rows]);
   const labels = useMemo(() => city.labels ?? {}, [city.labels]);
@@ -69,7 +72,7 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
   // Same column set and order as the web sheet. Which of them this phone shows is its own choice, remembered per sheet.
   const cfg = city.scrape;
   const keys = sheetKeys(cfg, blankKeys, city.view?.order);
-  const labelOf = (k: string) => (cfg || k === SUMMARY_KEY ? (fieldByKey(k)?.label ?? k) : k.toUpperCase());
+  const labelOf = (k: string) => (cfg || k === SUMMARY_KEY || k === ATC_KEY ? (fieldByKey(k)?.label ?? k) : k.toUpperCase());
 
   // Only ever rendered after the workspace has loaded in the browser, so reading localStorage here is safe.
   // null = never chosen, so the defaults apply; an empty list is a real choice (show only the name).
@@ -133,11 +136,11 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
     [labels, setSheet, id, domainId, cityId],
   );
 
-  const saveNote = (r: number, v: string) => {
+  const saveCell = (r: number, key: string, v: string) => {
     const next = rows.slice();
     const cell = { ...next[r] };
-    if (v) cell[SUMMARY_KEY] = v;
-    else delete cell[SUMMARY_KEY];
+    if (v) cell[key] = v;
+    else delete cell[key];
     next[r] = cell;
     setSheet(id, domainId, cityId, { rows: next });
   };
@@ -145,8 +148,9 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
   const done = Object.keys(labels).length;
   const phoneKey = keys.includes("phone") ? "phone" : null;
   const nameKey = keys.includes("name") ? "name" : null;
-  const bodyKeys = shown.filter((k) => k !== nameKey && k !== SUMMARY_KEY);
+  const bodyKeys = shown.filter((k) => k !== nameKey && k !== SUMMARY_KEY && k !== ATC_KEY);
   const showNote = shown.includes(SUMMARY_KEY);
+  const showAtc = shown.includes(ATC_KEY);
 
   return (
     <div className="min-h-dvh bg-neutral-50 pb-[env(safe-area-inset-bottom)]">
@@ -254,6 +258,15 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
                   )}
                 </button>
               )}
+              {showAtc && (
+                <button type="button" onClick={() => setAtc(r)} className="mt-2 block w-full rounded-xl border border-dashed border-neutral-300 px-3 py-2 text-left active:bg-neutral-50">
+                  {row[ATC_KEY] ? (
+                    <span className={cn("line-clamp-2 text-sm leading-relaxed", isOverdue(row[ATC_KEY]) ? "font-medium text-red-600" : "text-neutral-700")}>Call back: {previewAtc(row[ATC_KEY])}</span>
+                  ) : (
+                    <span className="text-sm text-neutral-400">Add callback date (ATC)</span>
+                  )}
+                </button>
+              )}
               <button type="button" onClick={() => setPick(r)} className="mt-2 flex h-10 w-full items-center justify-between rounded-xl bg-neutral-50 px-3 text-left active:bg-neutral-100">
                 <LabelChip tree={tree} id={labels[r]} />
                 <ChevronRight className="size-4 text-neutral-400" />
@@ -296,8 +309,17 @@ function Leads({ id, domainId, cityId, tree, title }: { id: string; domainId: st
         <CallSummaryDialog
           name={(nameKey && rows[note]?.[nameKey]) || `Lead ${note + 1}`}
           value={rows[note]?.[SUMMARY_KEY] ?? ""}
-          onSave={(v) => saveNote(note, v)}
+          onSave={(v) => saveCell(note, SUMMARY_KEY, v)}
           onClose={() => setNote(null)}
+        />
+      )}
+
+      {atc !== null && (
+        <AtcDialog
+          name={(nameKey && rows[atc]?.[nameKey]) || `Lead ${atc + 1}`}
+          value={rows[atc]?.[ATC_KEY] ?? ""}
+          onSave={(v) => saveCell(atc, ATC_KEY, v)}
+          onClose={() => setAtc(null)}
         />
       )}
 

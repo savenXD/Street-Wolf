@@ -8,7 +8,7 @@ import { BrandIcon } from "@/components/brand-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { defaultTree, labelById, layout } from "@/lib/labels";
-import { fieldByKey, SUMMARY_KEY, sheetKeys, type ScrapeConfig } from "@/lib/maps-fields";
+import { ATC_KEY, fieldByKey, SUMMARY_KEY, sheetKeys, type ScrapeConfig } from "@/lib/maps-fields";
 import { previewSummary } from "@/lib/call-summary";
 import { nonOutreachIds } from "@/lib/outreach";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,8 @@ import { type Campaign, type City, type Domain, useWorkspace } from "@/lib/works
 import { parseCsv, toCsv } from "@/lib/csv";
 import { CsvImport, type ImportMode, type ImportRecord } from "./csv-import";
 import { CallSummaryDialog } from "./call-summary-dialog";
+import { AtcDialog } from "./atc-dialog";
+import { isOverdue, previewAtc } from "@/lib/atc";
 import { LabelChip } from "./label-chip";
 import { LabelEditor } from "./label-editor";
 import { LabelGraph } from "./label-graph";
@@ -92,6 +94,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const [drawer, setDrawer] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [summaryRow, setSummaryRow] = useState<number | null>(null);
+  const [atcRow, setAtcRow] = useState<number | null>(null);
   const [setupKey, setSetupKey] = useState(0);
   // Columns the person removed in the setup drawer, waiting for a "yes, delete their data".
   const [dropAsk, setDropAsk] = useState<{ config: ScrapeConfig; dropped: string[]; withData: string[] } | null>(null);
@@ -140,7 +143,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
   const cfg = city.scrape;
   // Data columns are whatever was picked in the scrape setup (blank before that), in the user's order. Column A is always Label.
   const keys = sheetKeys(cfg, blankKeys, city.view?.order);
-  const cols = [{ key: "label", label: "Label" }, ...keys.map((k) => ({ key: k, label: k === SUMMARY_KEY || cfg ? (fieldByKey(k)?.label ?? k) : "" }))];
+  const cols = [{ key: "label", label: "Label" }, ...keys.map((k) => ({ key: k, label: k === SUMMARY_KEY || k === ATC_KEY || cfg ? (fieldByKey(k)?.label ?? k) : "" }))];
   const colCount = cols.length;
   const rows = useMemo(() => city.rows ?? [], [city.rows]);
   const labels = useMemo(() => city.labels ?? {}, [city.labels]);
@@ -240,6 +243,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
     if (c === 0) return;
     // The call summary is long and written in points, so it gets its own window instead of a one-line box.
     if (cols[c].key === SUMMARY_KEY) return setSummaryRow(r);
+    if (cols[c].key === ATC_KEY) return setAtcRow(r);
     setDraft(initial ?? cellText(r, c));
     setEditing([r, c]);
   };
@@ -653,6 +657,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                           if (!single || e.shiftKey) return;
                           if (i === 0) setPicker({ row: r, rect: e.currentTarget.getBoundingClientRect() });
                           else if (c.key === SUMMARY_KEY) setSummaryRow(r);
+                          else if (c.key === ATC_KEY) setAtcRow(r);
                         }}
                         onDoubleClick={() => i > 0 && startEdit(r, i)}
                         className={cn(
@@ -693,6 +698,8 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
                           <LabelChip tree={tree} id={labels[r]} />
                         ) : c.key === SUMMARY_KEY ? (
                           previewSummary(rows[r]?.[c.key] ?? "")
+                        ) : c.key === ATC_KEY ? (
+                          <span className={cn(isOverdue(rows[r]?.[c.key] ?? "") && "font-medium text-red-600")}>{previewAtc(rows[r]?.[c.key] ?? "")}</span>
                         ) : (
                           rows[r]?.[c.key]
                         )}
@@ -749,6 +756,15 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
         />
       )}
 
+      {atcRow !== null && (
+        <AtcDialog
+          name={rows[atcRow]?.name ?? ""}
+          value={rows[atcRow]?.[ATC_KEY] ?? ""}
+          onSave={(v) => commit({ rows: withCells([{ r: atcRow, key: ATC_KEY, v }]) })}
+          onClose={() => (setAtcRow(null), grid.current?.focus())}
+        />
+      )}
+
       <MobileLink open={mobileOpen} onClose={() => setMobileOpen(false)} path={`/m/${id}/${domainId}/${cityId}`} />
 
       {csv && (
@@ -786,6 +802,7 @@ function SheetView({ id, domainId, cityId, campaign, domain, city }: { id: strin
           domain={domain.name}
           city={city.name}
           initial={cfg}
+          historyPath={`/api/campaigns/${id}/domains/${domainId}/places/${cityId}/queries`}
           onChange={(c) => setScrape(id, domainId, cityId, c)}
           onSet={(c) => {
             setDrawer(false);
