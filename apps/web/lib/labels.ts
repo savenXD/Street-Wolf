@@ -31,11 +31,19 @@ export const defaultTree: LabelNode = {
             { id: "will-think", name: "Client will think", color: "#8b5cf6" },
           ],
         },
-        { id: "not-sure", name: "Not sure", color: "#3b82f6", children: [{ id: "follow-up", name: "Follow up needed", color: "#60a5fa" }] },
-        { id: "not-interested", name: "Not interested", color: "#ef4444" },
+        {
+          id: "not-interested",
+          name: "Not interested",
+          color: "#ef4444",
+          children: [
+            { id: "already-has-service", name: "Already has service", color: "#f87171" },
+            { id: "no-need", name: "Doesn't see the need", color: "#fb923c" },
+          ],
+        },
       ],
     },
     { id: "no-pick", name: "Didn't pick", color: "#f59e0b" },
+    { id: "irrelevant", name: "Irrelevant lead", color: "#a3a3a3" },
   ],
 };
 

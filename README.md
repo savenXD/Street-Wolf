@@ -4,12 +4,33 @@
 rating, reviews), shortlist the best fits, and run outreach with your team: call, WhatsApp, label every lead and keep call
 notes. 100% free, no paywalls, and the scraper runs on your own computer. Instagram, Reddit and X scrapers are next.
 
+![Street Wolf landing page](docs/screenshots/landing-hero.png)
+
+## Screenshots
+
+**How it works.** Leads from Instagram, Reddit, X and Google Maps flow into one sheet, a local AI filter (Ollama) keeps the
+ones that look like real buyers, and the rest go straight to outreach.
+
+![Sources flowing into one lead sheet, through a local AI filter, into outreach](docs/screenshots/landing-pipeline.png)
+
+**Dashboard.** Per campaign: lead, outreach and conversion totals, an outreach funnel that points at the biggest drop-off,
+how every call ended, outreach per teammate per day, and the team.
+
+![Campaign dashboard with funnel, call outcomes, daily outreach and team](docs/screenshots/dashboard.png)
+
+**Lead sheet.** One sheet per niche and city, filled live by the scraper. Every row gets an outcome label and a call summary.
+
+![Lead sheet with labels, call summaries and scraped business details](docs/screenshots/lead-sheet.png)
+
+<sub>The campaign, people and businesses in these screenshots are made-up demo data.</sub>
+
 ## What is in it
 
 | Part | What it does |
 | --- | --- |
 | **Lead sheets** (`/dashboard`) | A spreadsheet per niche and city. Type, paste, drag columns, import and export CSV. Every row has an outcome **label** (a configurable tree such as Called › Picked › Interested › Converted) and a **Call summary** column. |
 | **Google Maps scraper** (`apps/scraper`, `tools/google-maps`) | A fast, polite scraper installed on Windows or Linux. It claims jobs from the web app and streams results into the open sheet. Needs no account of its own, only a token from Settings. |
+| **Dashboard** (`/dashboard`) | Per campaign: totals, an **outreach funnel** (Leads › Called › Picked › Interested › Converted, with the step that loses the most people called out), **call outcomes** broken down by label, outreach per day per teammate, and the team. |
 | **Teams** | Campaigns with owner, admin and member roles, email invites, in-app notifications, per-person daily outreach counts and charts. Many people can label one sheet at once; edits merge per cell. |
 | **Mobile Outreach** (`/m/...`) | A phone layout of any sheet. Open the link from the sheet's **Mobile Outreach** button on a phone and sign in. See below. |
 | **Landing site** (`/`) | Marketing page and SEO pages (`/google-maps-scraper`, `/run-locally`, `/open-source-lead-generation`). |
@@ -26,6 +47,22 @@ Same data, different screen, so labels set on the phone appear on the web (and f
 * **Pamphlets:** ready follow-up messages that open WhatsApp with the text filled in, and a shareable image whose business name,
   prices and colour you can change. Stored in the browser for now (`apps/web/lib/pamphlets.ts`).
 * **Call summary:** write points as `- first point - second point`; it shows as a list in a small dotted window, on web and phone.
+
+### Call-outcome labels
+
+Each campaign has a label tree (edit it with **Edit labels** on any sheet). The default:
+
+```
+Called
+├─ Picked
+│  ├─ Interested → Converted · Busy (interested / not interested) · Client will think
+│  └─ Not interested → Already has service · Doesn't see the need
+├─ Didn't pick
+└─ Irrelevant lead
+```
+
+Every label except **Didn't pick** counts as outreach. The dashboard funnel and outcome chart are built from this tree, so a
+custom tree still gets sensible charts. See `apps/web/lib/labels.ts` and `apps/web/lib/funnel.ts`.
 
 ## Stack
 

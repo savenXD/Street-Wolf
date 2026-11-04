@@ -5,6 +5,7 @@ import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { BrandIcon, type BrandName } from "@/components/brand-icon";
+import { OutreachInsights } from "@/components/dashboard/outreach-insights";
 import { Avatar } from "@/components/ui/avatar";
 import { featureById } from "@/lib/features";
 import { useToday } from "@/lib/presence";
@@ -186,6 +187,8 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
         <Metric label="Converted" value={converted} hint="Replied or booked" />
         <Metric label="Conversion rate" value={rate} hint="Converted / outreached" />
       </div>
+
+      <OutreachInsights campaign={campaign} />
 
       <div className="grid gap-3 lg:grid-cols-3">
       <OutreachChart

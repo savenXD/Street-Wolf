@@ -56,7 +56,7 @@ Every query is index-backed. They are all in `packages/db/src/indexes.ts`; the i
 * `users.email` unique; `users.googleId` partial-unique.
 * `members (campaignId,userId)` unique and `members (userId)` ("which campaigns am I in").
 * `invites.tokenHash` unique; `invites (campaignId,email)` partial-unique where `status:"pending"` (one open invite per person); `invites (email,status)`.
-* `leads (placeId,row)` unique; `leads (placeId,source,sourceId)` partial-unique (scrape dedupe); `leads (placeId,updatedAt,row)` (live sync, paged by time then row); `leads (campaignId,label)`.
+* `leads (placeId,row)` unique; `leads (placeId,source,sourceId)` partial-unique (scrape dedupe); `leads (placeId,updatedAt,row)` (live sync, paged by time then row); `leads (campaignId,label,placeId)` (dashboard: rows per label per place, answered from the index alone).
 * `dailyStats (campaignId,day)` and `(campaignId,userId,day)`.
 * Removed as unused (they only added a write to every row change): `leads (campaignId,label)` and `authTokens (email,createdAt)`. `ensureIndexes` drops them on boot. Campaign delete now removes leads by `placeId`, so no campaign-first index on `leads` is needed.
 * TTL indexes on `sessions`, `authTokens`, `oauthStates`, `rateLimits`, `notifications`, sent `emails`: Mongo cleans these itself, no job needed.
