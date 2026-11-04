@@ -37,7 +37,7 @@ export function lastDays(n: number, tz = "UTC") {
  * campaigns the user has. Sheet rows are NOT included; they're fetched per place when a sheet opens.
  */
 export async function loadWorkspace(userId: string, only?: string[]) {
-  const [members, users, campaigns, invites, domains, places, daily, leads] = [
+  const [members, users, campaigns, invites, domains, places, daily] = [
     await col("members"),
     await col("users"),
     await col("campaigns"),
@@ -45,7 +45,6 @@ export async function loadWorkspace(userId: string, only?: string[]) {
     await col("domains"),
     await col("places"),
     await col("dailyStats"),
-    await col("leads"),
   ];
   const mine = await members.find({ userId, ...(only ? { campaignId: { $in: only } } : {}) }).toArray();
   const ids = mine.map((m) => m.campaignId);
@@ -53,7 +52,7 @@ export async function loadWorkspace(userId: string, only?: string[]) {
   const myRole = new Map<string, Role>(mine.map((m) => [m.campaignId, m.role]));
 
   const since = dayKey(new Date(Date.now() - (DAYS + 1) * 86400_000)); // one spare day: members in other zones start earlier
-  const [cs, allMembers, pending, ds, ps, totals, recent, labelled] = await Promise.all([
+  const [cs, allMembers, pending, ds, ps, totals, recent] = await Promise.all([
     campaigns.find({ _id: { $in: ids } }).toArray(),
     members.find({ campaignId: { $in: ids } }).toArray(),
     invites.find({ campaignId: { $in: ids }, status: "pending", expiresAt: { $gt: new Date() } }).toArray(),
@@ -64,14 +63,7 @@ export async function loadWorkspace(userId: string, only?: string[]) {
       { $group: { _id: { c: "$campaignId", u: "$userId" }, leads: { $sum: "$leads" }, outreached: { $sum: "$outreached" }, converted: { $sum: "$converted" } } },
     ]).toArray(),
     daily.find({ campaignId: { $in: ids }, day: { $gte: since } }).toArray(),
-    // How many rows carry each label, per place, for the dashboard's funnel. Covered by the (campaignId, label, placeId) index.
-    leads.aggregate<{ _id: { p: string; l: string }; n: number }>([
-      { $match: { campaignId: { $in: ids }, label: { $type: "string" } } },
-      { $group: { _id: { p: "$placeId", l: "$label" }, n: { $sum: 1 } } },
-    ]).toArray(),
   ]);
-  const labelCounts = new Map<string, Record<string, number>>();
-  for (const { _id, n } of labelled) (labelCounts.get(_id.p) ?? labelCounts.set(_id.p, {}).get(_id.p)!)[_id.l] = n;
   const people = await users.find({ _id: { $in: [...new Set(allMembers.map((m) => m.userId))] } }, { projection: { name: 1, email: 1, avatarUrl: 1, tz: 1 } }).toArray();
   const person = new Map(people.map((u) => [u._id, u]));
 
@@ -126,7 +118,7 @@ export async function loadWorkspace(userId: string, only?: string[]) {
           image: d.image ?? undefined,
           cities: cp
             .filter((p) => p.domainId === d._id)
-            .map((p) => ({ id: p._id, name: p.name, scrape: p.scrape ?? undefined, view: p.view ?? undefined, stats: p.stats, labelCounts: labelCounts.get(p._id) ?? {} })),
+            .map((p) => ({ id: p._id, name: p.name, scrape: p.scrape ?? undefined, view: p.view ?? undefined, stats: p.stats })),
         })),
         stats: {
           totals: cp.reduce<Counts>((a, p) => ({ leads: a.leads + p.stats.leads, outreached: a.outreached + p.stats.outreached, converted: a.converted + p.stats.converted }), zero()),

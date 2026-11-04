@@ -37,7 +37,6 @@ export async function ensureIndexes() {
       // Re-scrapes of the same business must not create duplicates.
       { key: { placeId: 1, source: 1, sourceId: 1 }, unique: true, partialFilterExpression: { sourceId: { $type: "string" } } },
       { key: { placeId: 1, updatedAt: 1, row: 1 } }, // live sync: "rows changed since..." for one sheet, paged by (updatedAt, row)
-      { key: { campaignId: 1, label: 1, placeId: 1 } }, // dashboard: rows per label per place, answered from the index alone
     ]),
     c("notifications").createIndexes([
       { key: { userId: 1, createdAt: -1 } },

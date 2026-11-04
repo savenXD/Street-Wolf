@@ -26,8 +26,6 @@ export type City = { id: string; name: string; scrape?: ScrapeConfig; /** Call-o
   view?: { order?: string[]; widths?: Record<string, number> };
   /** Server-side counters, so dashboards don't need the rows. Used while `rows` isn't loaded. */
   stats?: Counts;
-  /** Server-side: how many rows carry each label id. Used while `labels` isn't loaded. */
-  labelCounts?: Record<string, number>;
   /** Account mode: the rows have been fetched from the server. */
   loaded?: boolean;
   /** Bumped whenever rows arrive from the server (live scrape), so the sheet can drop its undo history. */
