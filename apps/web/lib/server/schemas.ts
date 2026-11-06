@@ -1,6 +1,10 @@
 import { z } from "zod";
+import type { CampaignPreset } from "@street-wolf/db";
 
 export const featureIds = z.array(z.string().max(60)).max(40);
+
+/** Kept in step with CampaignPreset (packages/db) and lib/presets.ts. */
+export const preset = z.enum(["b2b", "b2c", "d2c"] satisfies CampaignPreset[]);
 
 /** Column keys become Mongo field names, so keep them to plain identifiers (no dots or leading $). */
 export const cellKey = z.string().regex(/^[A-Za-z0-9_-]{1,60}$/, "Invalid column key");

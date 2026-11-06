@@ -3,7 +3,7 @@ import { col } from "@street-wolf/db";
 import { newId } from "@/lib/server/crypto";
 import { api, body, conflict, email, ok, uuid } from "@/lib/server/http";
 import { createInvite } from "@/lib/server/invites";
-import { featureIds } from "@/lib/server/schemas";
+import { featureIds, preset } from "@/lib/server/schemas";
 import { rateLimit } from "@/lib/server/ratelimit";
 import { requireBrowserUser } from "@/lib/server/session";
 import { loadWorkspace } from "@/lib/server/workspace";
@@ -12,6 +12,7 @@ const Body = z.object({
   id: uuid.optional(), // the browser mints ids so the UI can update before the server answers
   name: z.string().trim().min(1).max(80),
   purpose: z.string().trim().max(500).default(""),
+  preset: preset.default("b2b"),
   features: featureIds.default([]),
   team: z.array(email).max(50).default([]),
 });
@@ -26,7 +27,7 @@ export const POST = api(async (req) => {
   const id = b.id ?? newId();
   const now = new Date();
   try {
-    await campaigns.insertOne({ _id: id, ownerId: user._id, name: b.name, purpose: b.purpose, features: b.features, labelTree: null, createdAt: now, updatedAt: now });
+    await campaigns.insertOne({ _id: id, ownerId: user._id, name: b.name, purpose: b.purpose, preset: b.preset, features: b.features, labelTree: null, createdAt: now, updatedAt: now });
   } catch (e) {
     if ((e as { code?: number }).code === 11000) throw conflict("That campaign already exists");
     throw e;

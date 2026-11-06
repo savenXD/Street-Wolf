@@ -13,18 +13,38 @@ How a lead moves through it:
 2. **Shortlist and work.** Rows are edited per cell; each row carries one **label** from the campaign's outcome tree. Giving a row a
    label other than "Didn't pick" counts as outreach, credited once to the person who did it (see DATABASE.md section 4).
 3. **Follow up on a phone.** The sheet's **Mobile Outreach** link opens `/m/<campaign>/<domain>/<city>`, a phone layout of the same
-   sheet using the same store and sync (`apps/web/components/mobile`). Icon buttons call or open WhatsApp from the phone column
-   (`lib/phone.ts` normalises Indian formats), labels sync back, and **Pamphlets** (`lib/pamphlets.ts`) send ready messages or a
+   sheet using the same store and sync (`platforms/google-maps/outreach/mobile`). Icon buttons call or open WhatsApp from the phone column
+   (`packages/core/src/phone.ts` normalises Indian formats), labels sync back, and **Pamphlets** (`platforms/google-maps/outreach/whatsapp`) send ready messages or a
    price image. Access is by normal sign-in; the route is protected in `proxy.ts` and blocked from search engines.
 4. **Call summary.** Every sheet has a `callSummary` column (the 2nd column by default, not part of the scrape setup). It is a normal
-   cell, so it is saved, synced and merged like any other. Points are written `- one - two` and shown by `lib/call-summary.ts` in a
+   cell, so it is saved, synced and merged like any other. Points are written `- one - two` and shown by `packages/core/src/call-summary.ts` in a
    dotted window (`components/dashboard/call-summary-dialog.tsx`). Limit: 5,000 characters per cell.
 
-What is not built yet: Instagram, Reddit and X scrapers and outreach (the schema is ready, see the end of this file), editing the
-pamphlet messages in settings (they are fixed defaults, and the pamphlet itself is stored per browser), and a hosted scraper.
+### Platforms and presets
 
-Repository map: `apps/web` (UI + API) · `apps/scraper` (local worker) · `packages/db` (types, indexes) · `tools/google-maps` ·
-`packages/tool-sdk` · `scripts` (tests) · `docs`.
+The code is organised **one folder per platform** in `platforms/<name>/`. A platform folder holds everything about that
+platform: its scraping (including the code that runs in the downloadable scraper), its outreach channels, posting, its
+screens and its API logic. Google Maps, for example, contains its scraper, WhatsApp outreach and ElevenLabs AI calling.
+Platforms never import each other; they share the core in `apps/web` (UI kit, store, labels, auth, ...). The apps plug
+platforms in through one small registry file each. Rules, folder shape and how to add one: [platforms/README.md](../platforms/README.md).
+
+A campaign starts with **Who do you sell to?** (a *preset*: `apps/web/lib/presets.ts`). The preset decides which platforms
+the next step offers and which of their features start switched on. The campaign stores `preset` and its switched-on
+`features` (ids like `googlemaps:whatsapp`), and its page shows the tiles each platform renders for those features.
+
+| Preset | Platforms | Status |
+| --- | --- | --- |
+| B2B | Google Maps: scraping (live), WhatsApp outreach (in progress, next), AI calling via ElevenLabs (planned) | available |
+| B2C | to be decided | coming soon |
+| D2C | Instagram, Reddit, X: scraping, their outreach, posting | coming soon |
+
+What is not built yet: WhatsApp sending and ElevenLabs calling, the Instagram, Reddit and X platforms, editing the pamphlet
+messages in settings (they are fixed defaults, and the pamphlet itself is stored per browser), and a hosted scraper.
+
+Repository map: `apps/web` (host app: UI, API, store; `apps/web/kit` is what platforms may use) · `platforms/<name>` (one
+folder per platform) · `apps/scraper` (local engine: browser, proxies, pacing, job loop) · `packages/core` (pure shared logic)
+· `packages/platform-sdk` (the platform contract, types only) · `packages/db` (types, indexes) · `scripts` (tests, packaging,
+wiring check) · `docs`. The full map, rules and "where does new code go" table: [AGENTS.md](../AGENTS.md).
 
 # Street Wolf: backend architecture
 
@@ -69,7 +89,7 @@ Ids are strings (UUIDs) minted by the browser, so the UI updates instantly and r
 | `authTokens` | One-time sign-in links | sha256, single use (atomic), 15 min TTL |
 | `oauthStates` | Google OAuth state + PKCE verifier | single use, 10 min TTL |
 | `apiTokens` | Scraper access tokens | stored hashed; secret shown once |
-| `campaigns` / `members` | Campaigns and who is on them | role = `owner` / `admin` / `member`; unique (campaign, user) |
+| `campaigns` / `members` | Campaigns (`preset`, switched-on `features`) and who is on them | role = `owner` / `admin` / `member`; unique (campaign, user) |
 | `invites` | Pending/accepted/revoked invites | token stored hashed; one *pending* invite per (campaign, email); 14-day expiry |
 | `domains` → `places` | A niche and the cities it is hunted in | `places.stats` holds counters so dashboards never scan leads |
 | `leads` | One document per sheet row | unique (place, row); partial-unique (place, source, sourceId) for scrape dedupe |
@@ -136,18 +156,25 @@ response and is retried (exponential backoff, 6 attempts) by the cron drain, so 
 
 ## Adding Instagram, Reddit, LinkedIn…
 
-The schema is already platform-neutral:
-1. Add the platform to `Platform` (`packages/db/src/types.ts`) and the `source` enums in `app/api/ingest` and `app/api/jobs`.
-2. Add its features in `lib/features.ts` (the UI already lists Instagram and Reddit there).
-3. Its scraper claims `jobs` with `tool: "instagram"` and pushes rows to `/api/ingest` with `source: "instagram"` and a stable
-   `sourceId` (so re-scrapes dedupe). Columns are free-form (`cells`), so no migration is needed.
-4. Outreach platforms (calling, WhatsApp, DMs) record actions the same way the sheet does: labelling a row bumps `dailyStats`.
+Follow [platforms/README.md](../platforms/README.md): a new `platforms/<name>/` folder, then one line in each app's registry.
+What the backend already gives a new platform:
+1. Its scraper claims `jobs` with `tool: "<name>"` (checked by its own `server.ts`) and pushes rows to `/api/ingest` with
+   `source: "<name>"` and a stable `sourceId` (so re-scrapes dedupe). Columns are free-form (`cells`), so leads need no migration.
+   Add the id to `Platform` in `packages/db/src/types.ts` and to the `source` enum in `app/api/ingest`.
+2. Outreach (calling, WhatsApp, DMs, email) records actions the same way the sheet does: labelling a row bumps `dailyStats`.
+3. One structural change is due with the second platform: leads are grouped niche → **city** (`domains` → `places`), which fits
+   Google Maps only. Instagram lists are hashtags or niches and Reddit's are subreddits, so `places` becomes a general list
+   with a platform field and that platform's setup.
 
 Full database and backend reference (every field, index, counting rule, concurrency guarantee, polling load): see [DATABASE.md](./DATABASE.md).
 
 ## Tests
 
-* `node scripts/e2e.mjs`: 101 API checks (auth, CSRF, rate limits, roles, invites, notifications, sheets, ingest, jobs,
+* `pnpm check`: platform wiring (`scripts/check-platforms.mjs`), then typecheck, lint and unit tests (`packages/core/test`) in
+  every package. CI (`.github/workflows/ci.yml`) runs it, builds the app and the scraper download, then both e2e suites.
+* `node scripts/e2e-browser.mjs`: real browsers on one 1,500-row sheet: virtual scrolling, two people editing, stale screens,
+  failed saves, undo, CSV import permissions. Columns are found by header text.
+* `node scripts/e2e.mjs`: API checks (auth, CSRF, rate limits, roles, invites, notifications, sheets, ingest, jobs,
   cascades, concurrency, DB state). Needs a running server and `MONGODB_URI`/`MONGODB_DB`.
 * `node scripts/load.mjs`: the 500-user simulation.
 * Throwaway database for both: `PORT=27099 node scripts/dev-db.mjs` (it is throwaway by default).

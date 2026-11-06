@@ -3,7 +3,7 @@
 import { Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { parseSummary } from "@/lib/call-summary";
+import { parseSummary } from "@street-wolf/core/call-summary";
 
 const MAX = 5000; // the server's limit for one cell
 

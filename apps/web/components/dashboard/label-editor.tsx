@@ -4,7 +4,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { addChild, defaultTree, type LabelNode, layout, mapNode, palette, removeNode } from "@/lib/labels";
+import { addChild, defaultTree, type LabelNode, layout, mapNode, palette, removeNode } from "@street-wolf/core/labels";
 import { cn } from "@/lib/utils";
 
 export function LabelEditor({ tree, onSave, onClose }: { tree: LabelNode; onSave: (t: LabelNode | null) => void; onClose: () => void }) {

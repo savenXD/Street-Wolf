@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { MobileOutreach } from "@/components/mobile/mobile-outreach";
+import { MobileOutreach } from "@street-wolf/google-maps/mobile";
 
 async function Body({ params }: Pick<PageProps<"/m/[id]/[domain]/[city]">, "params">) {
   const { id, domain, city } = await params;

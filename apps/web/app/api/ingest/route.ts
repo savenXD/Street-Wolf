@@ -9,7 +9,7 @@ import { requireUser } from "@/lib/server/session";
 import { ingestLeads } from "@/lib/server/sheets";
 
 const Items = z.array(z.object({ sourceId: z.string().min(1).max(300), cells: z.record(cellKey, z.string().max(5000)) })).min(1).max(1000);
-const Body = z.object({ jobId: uuid.optional(), campaignId: uuid.optional(), placeId: uuid.optional(), source: z.enum(["googlemaps", "instagram", "reddit"]), items: Items });
+const Body = z.object({ jobId: uuid.optional(), campaignId: uuid.optional(), placeId: uuid.optional(), source: z.enum(["googlemaps", "instagram", "reddit", "x"]), items: Items });
 
 /** Long enough for the biggest delete, save or repair; hosts that cap functions lower than this use their own limit. */
 export const maxDuration = 60;

@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Platform screens live outside this app (platforms/<name>), so Tailwind must scan them too. */
+@source "../../../platforms";
 
 /* Strictly monochrome: white, black and the neutral grays between. */
 :root {

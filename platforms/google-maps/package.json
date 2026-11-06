@@ -1,0 +1,39 @@
+{
+  "name": "@street-wolf/google-maps",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "exports": {
+    "./platform": "./platform.ts",
+    "./fields": "./fields.ts",
+    "./web": "./web.ts",
+    "./mobile": "./outreach/mobile/mobile-outreach.tsx",
+    "./server": "./server.ts",
+    "./worker": "./scrape/worker/index.ts"
+  },
+  "dependencies": {
+    "@street-wolf/core": "workspace:*",
+    "@street-wolf/db": "workspace:*",
+    "@street-wolf/platform-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "lucide-react": "*",
+    "motion": "*",
+    "next": "*",
+    "react": "*",
+    "react-dom": "*",
+    "server-only": "*",
+    "zod": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "eslint": "^9",
+    "patchright": "^1.55.0",
+    "typescript": "^5"
+  }
+}

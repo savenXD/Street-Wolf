@@ -4,18 +4,21 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "check": "node scripts/check-platforms.mjs && turbo typecheck lint test",
+    "check:platforms": "node scripts/check-platforms.mjs",
+    "typecheck": "turbo typecheck",
     "lint": "turbo lint",
+    "test": "turbo test",
     "db:dev": "node scripts/dev-db.mjs",
     "db:indexes": "pnpm --filter @street-wolf/db indexes",
     "e2e": "node scripts/e2e.mjs",
-    "scraper:package": "node scripts/package-scraper.mjs",
     "e2e:browser": "node scripts/e2e-browser.mjs",
-    "test:merge": "npx --yes tsx scripts/sheet-merge.test.ts",
-    "test:phone": "npx --yes tsx scripts/phone.test.ts"
+    "scraper:package": "node scripts/package-scraper.mjs"
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
-  }
+  },
+  "packageManager": "pnpm@12.16.1"
 }

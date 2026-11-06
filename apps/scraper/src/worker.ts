@@ -1,7 +1,8 @@
 import { Api } from "./api";
 import { loadSettings } from "./config";
+import { workers } from "./platforms";
 import { run } from "./runner";
-import { defaultConfig, type Hooks, type Job, type ScrapeConfig } from "./types";
+import type { Hooks, Job } from "./types";
 import { Aborted, sleep } from "./util";
 
 export type State = { connected: boolean; busy: boolean; jobId: string | null; progress: number; found: number; note: string; log: string[]; error: string | null };
@@ -16,16 +17,6 @@ function say(msg: string, level: "info" | "warn" | "error" = "info") {
   state.log.push(line);
   if (state.log.length > 200) state.log.shift();
   console.log(line);
-}
-
-function parseInput(job: Job): { cfg: ScrapeConfig; location: string } {
-  const i = (job.input ?? {}) as { config?: Partial<ScrapeConfig>; location?: string };
-  const base = defaultConfig([]);
-  const c = i.config ?? {};
-  const cfg: ScrapeConfig = { ...base, ...c, filters: { ...base.filters, ...(c.filters ?? {}) }, queries: (c.queries ?? []).filter(Boolean) };
-  if (!cfg.queries.length) throw new Error("This job has no search queries");
-  if (!cfg.fields?.length) cfg.fields = base.fields;
-  return { cfg, location: i.location ?? "" };
 }
 
 async function runJob(api: Api, job: Job) {
@@ -55,10 +46,12 @@ async function runJob(api: Api, job: Job) {
     }
   }, 3000);
   try {
-    const { cfg, location } = parseInput(job);
-    const known = cfg.filters.skipScraped ? await api.known(job.id) : new Set<string>();
-    if (known.size) say(`${known.size} businesses are already in this niche (this sheet or another city) and will be skipped`);
-    await run(cfg, location, hooks, loadSettings(), known);
+    const worker = workers[job.tool];
+    if (!worker) throw new Error(`This scraper can't run "${job.tool}" jobs yet. Update it from the Scraper guide.`);
+    const input = worker.parseInput(job.input);
+    const known = worker.skipKnown(input) ? await api.known(job.id) : new Set<string>();
+    if (known.size) say(`${known.size} already in this niche (this sheet or another one) and will be skipped`);
+    await run(worker, input, hooks, loadSettings(), known);
     await api.patch(job.id, { status: "done", progress: 1, leadsFound: found });
     say(`Job finished with ${found} leads`);
   } catch (e) {

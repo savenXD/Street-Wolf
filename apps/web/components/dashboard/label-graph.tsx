@@ -1,6 +1,6 @@
 "use client";
 
-import { type LabelNode, layout, pathTo } from "@/lib/labels";
+import { type LabelNode, layout, pathTo } from "@street-wolf/core/labels";
 import { cn } from "@/lib/utils";
 
 const NODE_H = 28;

@@ -2,11 +2,11 @@ import { loadSettings, type Settings } from "./config";
 import { Pacer } from "./pacer";
 import { fetchFreeProxies, loadOwnProxies, ProxyPool, type Proxy } from "./proxies";
 import { Session } from "./browser";
-import { scrapeMaps } from "./maps";
-import type { Hooks, ScrapeConfig } from "./types";
+import type { Page } from "patchright";
+import type { Hooks, ScrapeWorker } from "./types";
 
-/** Wires proxies, pacing and the browser together for one run, and always cleans the browser up. */
-export async function run(cfg: ScrapeConfig, location: string, hooks: Hooks, settings: Settings = loadSettings(), seenIds: Set<string> = new Set()) {
+/** Wires proxies, pacing and the browser together for one run of a platform's worker, and always cleans the browser up. */
+export async function run<I>(worker: ScrapeWorker<I, Page>, input: I, hooks: Hooks, settings: Settings = loadSettings(), seenIds: Set<string> = new Set()) {
   const own = loadOwnProxies();
   let list: (Proxy | null)[] = own;
   if (!own.length && settings.freeProxies) {
@@ -32,7 +32,7 @@ export async function run(cfg: ScrapeConfig, location: string, hooks: Hooks, set
   hooks.log(`${headless ? "Browser: background (no window)" : "Browser: visible window"}, ${click ? `click-through, ${workers} tab${workers > 1 ? "s" : ""}` : `fast mode, ${workers} tabs at once`}`);
   const session = new Session(headless, pool);
   try {
-    return await scrapeMaps(cfg, location, { session, pacer, hooks, seenIds, mode: settings.mode });
+    return await worker.run(input, { session, pacer, hooks, seenIds, mode: settings.mode });
   } finally {
     if (process.env.SW_DEBUG) hooks.log("  [closing browser]");
     await session.close();

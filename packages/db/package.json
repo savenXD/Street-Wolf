@@ -10,13 +10,15 @@
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "indexes": "tsx scripts/indexes.ts"
+    "indexes": "tsx scripts/indexes.ts",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "mongodb": "^6.18.0"
   },
   "devDependencies": {
     "tsx": "^4.20.0",
-    "@types/node": "^20"
+    "@types/node": "^20",
+    "typescript": "^5.8.0"
   }
 }

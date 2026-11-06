@@ -1,0 +1,19 @@
+{
+  "//": "Shared by every platform. Each platform tsconfig maps @/* to apps/web so the kit (@/kit/*) typechecks; lint allows only @/kit/*.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["node"],
+    "paths": {}
+  }
+}

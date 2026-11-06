@@ -67,22 +67,28 @@ const typeInto = async (page, r, c, text) => {
 const alice = await open(A), bob = await open(B);
 const ap = alice.page, bp = bob.page;
 
+// Column positions come from the header text, so adding or moving a column (like Call summary and ATC) never breaks these tests.
+const colOf = (page, label) =>
+  page.evaluate((l) => [...document.querySelectorAll("thead tr:last-child th")].findIndex((th) => th.textContent.trim().endsWith(l)) - 1, label);
+const NAME = await colOf(ap, "Business name"), CATEGORY = await colOf(ap, "Category"), PHONE = await colOf(ap, "Phone");
+t("the sheet's columns are found by name", NAME > 0 && CATEGORY > 0 && PHONE > 0, JSON.stringify({ NAME, CATEGORY, PHONE }));
+
 console.log("\nVirtual scrolling");
 t("only a window of rows is in the page, not 1500", (await rowsInDom(ap)) < 80, String(await rowsInDom(ap)));
 t("the header still shows all 1500 leads", (await ap.textContent("dl")).includes("1500"));
 await scrollTo(ap, 1_000_000);
-t("scrolling to the bottom shows the last rows", (await cell(ap, 1499, 1)) === "Biz 1499", String(await cell(ap, 1499, 1)));
+t("scrolling to the bottom shows the last rows", (await cell(ap, 1499, NAME)) === "Biz 1499", String(await cell(ap, 1499, NAME)));
 t("and still a small DOM", (await rowsInDom(ap)) < 80);
 await scrollTo(ap, 0);
-await ap.click(`[data-cell="0-1"]`);
+await ap.click(`[data-cell="0-${NAME}"]`);
 const t0 = Date.now();
 for (let i = 0; i < 40; i++) await ap.keyboard.press("ArrowDown");
 const perKey = (Date.now() - t0) / 40;
 t(`arrow keys stay fast (${perKey.toFixed(0)} ms per key incl. browser automation)`, perKey < 120);
 await scrollTo(ap, 0);
-await ap.click(`[data-cell="0-1"]`);
+await ap.click(`[data-cell="0-${NAME}"]`);
 for (let i = 0; i < 100; i++) await ap.keyboard.press("ArrowDown");
-t("keyboard navigation scrolls the selected row into view", await ap.evaluate(() => { const g = document.querySelector("[tabindex='0']"); const c = document.querySelector('[data-cell="100-1"]'); if (!c) return false; const a = c.getBoundingClientRect(), b = g.getBoundingClientRect(); return a.top >= b.top && a.bottom <= b.bottom + 1; }));
+t("keyboard navigation scrolls the selected row into view", await ap.evaluate((col) => { const g = document.querySelector("[tabindex='0']"); const c = document.querySelector(`[data-cell="100-${col}"]`); if (!c) return false; const a = c.getBoundingClientRect(), b = g.getBoundingClientRect(); return a.top >= b.top && a.bottom <= b.bottom + 1; }, NAME));
 
 console.log("\nTwo people, one sheet");
 // Bob labels row 3 through the API; Alice's open sheet picks the label up by itself.
@@ -93,7 +99,7 @@ for (let i = 0; i < 20 && !seen; i++) { await sleep(500); seen = ((await cell(ap
 t("a teammate's label appears on my screen without reloading", seen, String(await cell(ap, 3, 0)));
 t("and the Outreached counter moves", (await ap.textContent("dl")).includes("Outreached1"), await ap.textContent("dl"));
 // Alice edits a cell of the labelled row: the label must survive.
-await typeInto(ap, 3, 3, "999");
+await typeInto(ap, 3, PHONE, "999");
 await sleep(2500);
 let g = await server();
 t("editing a cell on a labelled row keeps the teammate's label", g.labels["3"] === "interested" && g.rows[3].phone === "999", JSON.stringify([g.labels["3"], g.rows[3]]));
@@ -101,22 +107,22 @@ t("editing a cell on a labelled row keeps the teammate's label", g.labels["3"] =
 // A stale screen: Alice stops hearing from the server, Bob labels, Alice edits.
 await ap.route("**/sync*", (r) => r.abort());
 await B.patch(`${P}/sheet`, { changes: [{ row: 5, label: "converted" }, { row: 6, set: { category: "Bakery" } }] });
-await typeInto(ap, 5, 1, "Renamed 5");
-await typeInto(ap, 6, 3, "666");
+await typeInto(ap, 5, NAME, "Renamed 5");
+await typeInto(ap, 6, PHONE, "666");
 await sleep(2500);
 g = await server();
 t("a stale screen cannot wipe a label it never saw", g.labels["5"] === "converted" && g.rows[5].name === "Renamed 5", JSON.stringify([g.labels["5"], g.rows[5]]));
 t("or a cell it never changed", g.rows[6].category === "Bakery" && g.rows[6].phone === "666", JSON.stringify(g.rows[6]));
 await ap.unroute("**/sync*");
 seen = false;
-for (let i = 0; i < 20 && !seen; i++) { await sleep(500); seen = ((await cell(ap, 5, 0)) ?? "").length > 0 && (await cell(ap, 6, 2)) === "Bakery"; }
-t("when sync returns, the stale screen catches up", seen, `${await cell(ap, 5, 0)} / ${await cell(ap, 6, 2)}`);
+for (let i = 0; i < 20 && !seen; i++) { await sleep(500); seen = ((await cell(ap, 5, 0)) ?? "").length > 0 && (await cell(ap, 6, CATEGORY)) === "Bakery"; }
+t("when sync returns, the stale screen catches up", seen, `${await cell(ap, 5, 0)} / ${await cell(ap, 6, CATEGORY)}`);
 
 console.log("\nTyping into a row a teammate just filled");
 await ap.route("**/sync*", (r) => r.abort());
 await scrollTo(ap, 1_000_000);
 await B.patch(`${P}/sheet`, { changes: [{ row: N, set: { name: "Bob's lead" } }] });
-await typeInto(ap, N, 1, "Alice's lead");
+await typeInto(ap, N, NAME, "Alice's lead");
 await sleep(2500);
 g = await server();
 t("Bob's lead stays on its row", g.rows[N].name === "Bob's lead", JSON.stringify(g.rows[N]));
@@ -124,18 +130,18 @@ t("Alice's lead is saved on the next free row", g.rows[N + 1]?.name === "Alice's
 await ap.unroute("**/sync*");
 await scrollTo(ap, 1_000_000);
 seen = false;
-for (let i = 0; i < 20 && !seen; i++) { await sleep(500); seen = (await cell(ap, N, 1)) === "Bob's lead" && (await cell(ap, N + 1, 1)) === "Alice's lead"; }
-t("Alice's screen shows both, in the right places", seen, `${await cell(ap, N, 1)} | ${await cell(ap, N + 1, 1)}`);
+for (let i = 0; i < 20 && !seen; i++) { await sleep(500); seen = (await cell(ap, N, NAME)) === "Bob's lead" && (await cell(ap, N + 1, NAME)) === "Alice's lead"; }
+t("Alice's screen shows both, in the right places", seen, `${await cell(ap, N, NAME)} | ${await cell(ap, N + 1, NAME)}`);
 
 // Same thing, but the teammate's row reaches Alice's screen before her save does.
 let hold; const gate = new Promise((r) => (hold = r));
 await ap.route("**/places/*/sheet", async (r) => { if (r.request().method() === "PATCH") { await gate; } await r.continue(); });
-await typeInto(ap, N + 3, 1, "Alice late");
+await typeInto(ap, N + 3, NAME, "Alice late");
 await B.patch(`${P}/sheet`, { changes: [{ row: N + 3, set: { name: "Bob late" } }] });
 await sleep(1500);
 hold(); // her save reaches the server after Bob's
 await sleep(7000); // then she moves down and syncs
-const dom = [await cell(ap, N + 3, 1), await cell(ap, N + 4, 1)];
+const dom = [await cell(ap, N + 3, NAME), await cell(ap, N + 4, NAME)];
 g = await server();
 t("on the screen, Bob's row stays Bob's and Alice's typing moves down", dom[0] === "Bob late" && dom[1] === "Alice late", JSON.stringify(dom));
 t("on the server too, with nothing mixed or lost", g.rows[N + 3].name === "Bob late" && g.rows[N + 4].name === "Alice late" && !g.rows[N + 3].category, JSON.stringify(g.rows.slice(N + 3, N + 5)));
@@ -146,7 +152,7 @@ console.log("\nSaving trouble");
 let failing = 2;
 await ap.route("**/places/*/sheet", async (r) => { if (r.request().method() === "PATCH" && failing-- > 0) return r.abort(); return r.continue(); });
 await scrollTo(ap, 0);
-await typeInto(ap, 10, 1, "After outage");
+await typeInto(ap, 10, NAME, "After outage");
 await sleep(9000);
 g = await server();
 t("a failed save is retried on its own", g.rows[10].name === "After outage", JSON.stringify(g.rows[10]));
@@ -158,22 +164,22 @@ await ap.route("**/places/*/sheet", async (r) => {
   if (JSON.stringify(b).includes("POISON") && b.changes.length >= 1) return r.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "nope" }) });
   return r.continue();
 });
-await typeInto(ap, 20, 1, "Fine 20");
-await typeInto(ap, 21, 1, "POISON");
-await typeInto(ap, 22, 1, "Fine 22");
+await typeInto(ap, 20, NAME, "Fine 20");
+await typeInto(ap, 21, NAME, "POISON");
+await typeInto(ap, 22, NAME, "Fine 22");
 await sleep(3500);
 g = await server();
 t("good rows save even when one row is refused", g.rows[20].name === "Fine 20" && g.rows[22].name === "Fine 22" && g.rows[21].name === "Biz 21", JSON.stringify([g.rows[20].name, g.rows[21].name, g.rows[22].name]));
-t("the refused row goes back to the saved version on screen", (await cell(ap, 21, 1)) === "Biz 21", String(await cell(ap, 21, 1)));
+t("the refused row goes back to the saved version on screen", (await cell(ap, 21, NAME)) === "Biz 21", String(await cell(ap, 21, NAME)));
 await ap.unroute("**/places/*/sheet");
 
 console.log("\nUndo survives the sync echo");
-await typeInto(ap, 30, 1, "Undo me");
+await typeInto(ap, 30, NAME, "Undo me");
 await sleep(8000); // the save, then at least one poll that echoes it back
-await ap.click(`[data-cell="31-1"]`);
+await ap.click(`[data-cell="31-${NAME}"]`);
 await ap.keyboard.press("Control+z");
 await sleep(400);
-t("Ctrl+Z still works after a poll", (await cell(ap, 30, 1)) === "Biz 30", String(await cell(ap, 30, 1)));
+t("Ctrl+Z still works after a poll", (await cell(ap, 30, NAME)) === "Biz 30", String(await cell(ap, 30, NAME)));
 await sleep(2500);
 
 console.log("\nImport CSV guard");

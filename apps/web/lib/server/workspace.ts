@@ -1,5 +1,6 @@
 import "server-only";
 import { col, type Role } from "@street-wolf/db";
+import { normalizeFeatures } from "@/lib/platforms";
 import { linkFor } from "./invites";
 
 export const DAYS = 14;
@@ -97,7 +98,8 @@ export async function loadWorkspace(userId: string, only?: string[]) {
         id: c._id,
         name: c.name,
         purpose: c.purpose,
-        features: c.features,
+        preset: c.preset ?? "b2b",
+        features: normalizeFeatures(c.features),
         labelTree: c.labelTree ?? undefined,
         createdAt: c.createdAt.getTime(),
         myRole: myRole.get(c._id)!,

@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { col, type Lead, type Platform } from "@street-wolf/db";
 import { newId } from "./crypto";
 import { HttpError } from "./http";
-import { countsAsOutreach, nonOutreachIds } from "@/lib/outreach";
+import { countsAsOutreach, nonOutreachIds } from "@street-wolf/core/outreach";
 import { dayKey } from "./workspace";
 
 /**

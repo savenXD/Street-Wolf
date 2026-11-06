@@ -5,7 +5,8 @@ import { Api } from "./api";
 import { DATA_DIR, loadSettings, saveSettings } from "./config";
 import { run } from "./runner";
 import { startServer } from "./server";
-import { defaultConfig, type Row } from "./types";
+import { defaultConfig, googleMapsWorker } from "../../../platforms/google-maps/scrape/worker/index";
+import type { Row } from "./types";
 import { workLoop } from "./worker";
 
 const HELP = `Street Wolf scraper
@@ -118,8 +119,8 @@ async function scrape(rest: string[], f: Record<string, string | true>) {
   // Results go to stdout (CSV), progress and messages to stderr, so `> leads.csv` captures clean data and nothing touches the disk by default.
   console.log(cfg.fields.join(","));
   await run(
-    cfg,
-    typeof f.location === "string" ? f.location : "",
+    googleMapsWorker,
+    { cfg, location: typeof f.location === "string" ? f.location : "" },
     {
       signal: ctl.signal,
       log: (m, l) => console.error(l === "warn" ? `! ${m}` : m),

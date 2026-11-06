@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/server/access";
 import { api, body, notFound, ok } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/ratelimit";
 import { applyChanges, MAX_ROW, readSheet } from "@/lib/server/sheets";
-import { nonOutreachIds } from "@/lib/outreach";
+import { nonOutreachIds } from "@street-wolf/core/outreach";
 import { requireBrowserUser } from "@/lib/server/session";
 import { validTz } from "@/lib/server/workspace";
 

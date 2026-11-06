@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { MapsHome } from "@/components/dashboard/maps-home";
+import { MapsHome } from "@street-wolf/google-maps/web";
 
 async function Body({ params }: Pick<PageProps<"/dashboard/maps/[id]">, "params">) {
   const { id } = await params;

@@ -3,8 +3,8 @@
 
 export type Role = "owner" | "admin" | "member";
 
-/** Every platform a campaign can use. New platforms (reddit, linkedin...) only need an entry here and in lib/features. */
-export type Platform = "googlemaps" | "instagram" | "reddit";
+/** Every platform id (platforms/<name>/platform.ts). Also a job's `tool` and a lead's `source`. */
+export type Platform = "googlemaps" | "instagram" | "reddit" | "x";
 
 export type User = {
   _id: string;
@@ -58,12 +58,17 @@ export type ApiToken = {
   lastUsedAt: Date | null;
 };
 
+/** Who a campaign sells to (apps/web/lib/presets.ts). */
+export type CampaignPreset = "b2b" | "b2c" | "d2c";
+
 export type Campaign = {
   _id: string;
   ownerId: string;
   name: string;
   purpose: string;
-  features: string[]; // feature ids from lib/features, e.g. "googlemaps:scrape"
+  /** Who the campaign sells to; decides which platforms the setup offered. Missing on campaigns made before presets = "b2b". */
+  preset?: CampaignPreset;
+  features: string[]; // feature ids from platforms/<name>/platform.ts, e.g. "googlemaps:scrape"
   labelTree: unknown | null; // custom call-outcome tree; null = built-in
   createdAt: Date;
   updatedAt: Date;

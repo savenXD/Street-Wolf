@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { buildAtc, dayLabel, fromIso, isoDay, parseAtc } from "@/lib/atc";
+import { buildAtc, dayLabel, fromIso, isoDay, parseAtc } from "@street-wolf/core/atc";
 import { cn } from "@/lib/utils";
 
 const MAX_NOTE = 500;

@@ -1,0 +1,57 @@
+# Runs on every push and pull request. `check` must pass before anything merges; `e2e` drives the real app against a
+# throwaway database (never a real one): the API suite, then the browser suite with two people editing one sheet.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check # platform wiring, typecheck, lint, unit tests
+      - run: pnpm --filter @street-wolf/web build
+        env:
+          NEXT_DIST_DIR: .next-check
+      - run: pnpm scraper:package # the downloadable scraper still builds
+
+  e2e:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27099
+      MONGODB_DB: e2e
+      NEXT_PUBLIC_SITE_URL: http://localhost:3100
+      BASE: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start a throwaway MongoDB
+        run: |
+          EPHEMERAL=1 PORT=27099 node scripts/dev-db.mjs &
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/27099) 2>/dev/null && break; sleep 2; done
+      - name: "Start the web app (dev mode: sign-in links are returned to the tests)"
+        working-directory: apps/web
+        run: |
+          NEXT_DIST_DIR=.next-e2e npx next dev -p 3100 > /tmp/web.log 2>&1 &
+          for i in $(seq 1 90); do curl -sf localhost:3100/api/health > /dev/null && break; sleep 2; done
+      - run: node scripts/e2e.mjs
+      - name: Browser for the browser suite
+        working-directory: apps/scraper
+        run: npx patchright install --with-deps chromium
+      - run: node scripts/e2e-browser.mjs
+      - if: failure()
+        run: tail -200 /tmp/web.log

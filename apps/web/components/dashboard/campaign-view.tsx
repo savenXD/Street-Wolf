@@ -1,12 +1,14 @@
 "use client";
 
 import { LinkPending } from "@/components/ui/spinner";
-import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
+import { ArrowUpRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { BrandIcon, type BrandName } from "@/components/brand-icon";
 import { Avatar } from "@/components/ui/avatar";
-import { featureById } from "@/lib/features";
+import { PlatformTiles } from "@/components/dashboard/platform-tiles";
+import { campaignPlatforms } from "@/lib/platforms";
+import { presetById } from "@/lib/presets";
 import { useToday } from "@/lib/presence";
 import { campaignStats, conversionRate, memberOutreachPerDay } from "@/lib/stats";
 import { cn } from "@/lib/utils";
@@ -160,9 +162,9 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
   const { leads, outreached, converted } = campaignStats(campaign);
   const rate = conversionRate({ leads, outreached, converted });
 
-  // One logo per brand powering the chosen features (Google Maps, ElevenLabs, WhatsApp, ...).
-  const brands = new Map<BrandName, string>();
-  for (const f of campaign.features.map(featureById)) if (f) brands.set(f.brand, f.platform);
+  // The platforms this campaign uses (one logo each); the tiles come from each platform, one per switched-on feature.
+  const used = campaignPlatforms(campaign.features);
+  const preset = presetById(campaign.preset);
 
   return (
     <article className="space-y-6 rounded-3xl border border-neutral-200 p-6">
@@ -172,9 +174,12 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
           <h2 className="truncate font-brand text-4xl font-bold tracking-[-0.04em]">{campaign.name}</h2>
         </div>
         <div className="flex gap-2">
-          {[...brands].map(([b, platform]) => (
-            <span key={b} title={platform} className="flex size-10 items-center justify-center rounded-xl border border-neutral-200">
-              <BrandIcon name={b} colored className="size-5" />
+          <span title={preset.tagline} className="flex h-10 items-center rounded-xl border border-neutral-200 px-3 text-sm font-semibold">
+            {preset.name}
+          </span>
+          {used.map((m) => (
+            <span key={m.id} title={m.name} className="flex size-10 items-center justify-center rounded-xl border border-neutral-200">
+              <BrandIcon name={m.brand as BrandName} colored className="size-5" />
             </span>
           ))}
         </div>
@@ -279,139 +284,11 @@ export function CampaignView({ campaign }: { campaign: Campaign }) {
       <section>
         <h3 className="font-semibold tracking-tight">Features</h3>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
-          {campaign.features.includes("googlemaps:scrape") && (
-          <Link
-            href={`/dashboard/maps/${campaign.id}`}
-            className="group relative flex aspect-[2.6/1] w-full flex-col justify-end overflow-hidden rounded-3xl border border-neutral-200 p-5 transition-all hover:-translate-y-0.5 hover:border-neutral-950 hover:shadow-lg"
-          >
-            <LinkPending overlay />
-            {/* Map-style illustration */}
-            <svg aria-hidden viewBox="0 0 160 160" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 -z-0 h-full w-full">
-              <rect width="160" height="160" fill="#f2efe9" />
-              <rect x="-10" y="92" width="86" height="78" rx="10" fill="#cfe8c4" />
-              <path d="M104 -10 C 96 40, 130 70, 112 110 S 120 150, 128 172 L 172 172 L 172 -10 Z" fill="#b9d9f2" />
-              <g fill="none" strokeLinecap="round">
-                <path d="M-10 60 L 170 40" stroke="#fff" strokeWidth="9" />
-                <path d="M40 -10 L 58 170" stroke="#fff" strokeWidth="9" />
-                <path d="M-10 120 L 100 150" stroke="#fff" strokeWidth="6" />
-                <path d="M-10 20 C 40 30, 70 10, 110 24" stroke="#fff" strokeWidth="5" />
-                <path d="M-10 84 L 170 98" stroke="#fbd986" strokeWidth="7" />
-                <path d="M-10 84 L 170 98" stroke="#f4c04e" strokeWidth="1" />
-              </g>
-              <rect x="64" y="52" width="22" height="16" rx="3" fill="#e4dfd5" />
-              <rect x="10" y="30" width="18" height="14" rx="3" fill="#e4dfd5" />
-              <rect x="72" y="118" width="20" height="14" rx="3" fill="#e4dfd5" />
-              <rect y="96" width="160" height="64" fill="url(#maps-fade)" />
-              <defs>
-                <linearGradient id="maps-fade" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#fff" stopOpacity="0" />
-                  <stop offset="1" stopColor="#fff" stopOpacity=".95" />
-                </linearGradient>
-              </defs>
-            </svg>
-            {/* Pin */}
-            <span className="absolute left-1/2 top-[34%] flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform group-hover:-translate-y-[60%]">
-              <BrandIcon name="googlemaps" colored className="size-8" />
-            </span>
-            <ArrowRight className="absolute right-4 top-4 size-5 text-neutral-500 transition-transform group-hover:translate-x-0.5 group-hover:text-neutral-950" />
-            <span className="relative">
-              <span className="flex items-center gap-2 font-brand text-2xl font-bold leading-tight tracking-[-0.03em]"><BrandIcon name="googlemaps" colored className="size-6 shrink-0" />Google Maps</span>
-              <span className="block text-sm text-neutral-500">
-                {campaign.domains.length} {campaign.domains.length === 1 ? "domain" : "domains"} ·{" "}
-                {campaign.domains.reduce((n, d) => n + d.cities.length, 0)} places
-              </span>
-            </span>
-          </Link>
-          )}
-          <SoftTile
-            title="ElevenLabs"
-            brand="elevenlabs"
-            sub="AI calling · coming soon"
-            art={
-              <svg aria-hidden viewBox="0 0 160 160" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
-                <rect width="160" height="160" fill="#f5f5f4" />
-                {/* Voice orb: ripple rings that spread on hover */}
-                <g fill="none" stroke="#0a0a0a">
-                  {[16, 30, 46, 64, 84].map((r, k) => (
-                    <circle
-                      key={r}
-                      cx="80"
-                      cy="54"
-                      r={r}
-                      strokeWidth={k === 0 ? 0 : 1.2}
-                      opacity={0.5 - k * 0.08}
-                      strokeDasharray={k % 2 ? "2 5" : undefined}
-                      className="origin-[80px_54px] transition-transform duration-700 ease-out group-hover:scale-[1.12]"
-                      style={{ transitionDelay: `${k * 40}ms` }}
-                    />
-                  ))}
-                  <circle cx="80" cy="54" r="16" fill="#e5e5e5" stroke="none" />
-                </g>
-                <g fill="#0a0a0a" className="transition-opacity duration-300">
-                  <circle cx="26" cy="30" r="3" opacity=".5" />
-                  <circle cx="138" cy="40" r="2.5" opacity=".4" />
-                  <circle cx="122" cy="76" r="2" opacity=".3" />
-                  <circle cx="34" cy="74" r="2" opacity=".3" />
-                </g>
-                <rect y="96" width="160" height="64" fill="url(#el-fade)" />
-                <defs>
-                  <linearGradient id="el-fade" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#fff" stopOpacity="0" />
-                    <stop offset="1" stopColor="#fff" stopOpacity=".95" />
-                  </linearGradient>
-                </defs>
-              </svg>
-            }
-            icon={<BrandIcon name="elevenlabs" className="size-8" />}
-          />
-          <SoftTile
-            title="WhatsApp"
-            brand="whatsapp"
-            sub="Outreach · coming soon"
-            art={
-              <svg aria-hidden viewBox="0 0 160 160" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
-                <rect width="160" height="160" fill="#e7f5ea" />
-                <g fill="#cfe9d5">
-                  {Array.from({ length: 6 }, (_, r) => Array.from({ length: 6 }, (_, c) => <circle key={`${r}-${c}`} cx={14 + c * 28 + (r % 2) * 14} cy={10 + r * 24} r="3" />))}
-                </g>
-                <rect x="16" y="22" width="70" height="26" rx="10" fill="#fff" />
-                <rect x="26" y="31" width="40" height="4" rx="2" fill="#d4d4d4" />
-                <rect x="26" y="38" width="26" height="4" rx="2" fill="#e5e5e5" />
-                <rect x="70" y="58" width="74" height="26" rx="10" fill="#d9fdd3" />
-                <rect x="80" y="67" width="44" height="4" rx="2" fill="#a7d9a0" />
-                <rect x="80" y="74" width="28" height="4" rx="2" fill="#bfe6b9" />
-                <rect x="16" y="92" width="56" height="22" rx="10" fill="#fff" />
-                <rect x="26" y="100" width="34" height="4" rx="2" fill="#d4d4d4" />
-                <rect y="96" width="160" height="64" fill="url(#wa-fade)" />
-                <defs>
-                  <linearGradient id="wa-fade" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#fff" stopOpacity="0" />
-                    <stop offset="1" stopColor="#fff" stopOpacity=".95" />
-                  </linearGradient>
-                </defs>
-              </svg>
-            }
-            icon={<BrandIcon name="whatsapp" colored className="size-8" />}
-          />
+          <PlatformTiles campaign={campaign} platformIds={used.map((m) => m.id)} />
         </div>
+        {used.length === 0 && <p className="mt-2 text-sm text-neutral-500">No features switched on for this campaign.</p>}
       </section>
     </article>
   );
 }
 
-/** A feature tile that isn't available yet: same look as the live ones, but inert. */
-function SoftTile({ title, sub, art, icon, brand }: { title: string; sub: string; art: React.ReactNode; icon: React.ReactNode; brand: BrandName }) {
-  return (
-    <div
-      aria-disabled
-      className="group relative flex aspect-[2.6/1] w-full cursor-default select-none flex-col justify-end overflow-hidden rounded-3xl border border-neutral-200 p-5 opacity-80 grayscale-[35%] transition-all duration-300 hover:-translate-y-0.5 hover:border-neutral-400 hover:opacity-100 hover:shadow-lg hover:grayscale-0"
-    >
-      <span className="absolute inset-0 transition-transform duration-700 ease-out group-hover:scale-110">{art}</span>
-      <span className="absolute left-1/2 top-[34%] flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-300 group-hover:-translate-y-[60%] group-hover:scale-105">{icon}</span>
-      <span className="relative">
-        <span className="flex items-center gap-2 font-brand text-2xl font-bold leading-tight tracking-[-0.03em]"><BrandIcon name={brand} colored className="size-6 shrink-0" />{title}</span>
-        <span className="block text-sm text-neutral-500">{sub}</span>
-      </span>
-    </div>
-  );
-}

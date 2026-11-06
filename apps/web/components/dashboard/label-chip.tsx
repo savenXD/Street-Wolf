@@ -1,4 +1,4 @@
-import { type LabelNode, labelById, pathTo } from "@/lib/labels";
+import { type LabelNode, labelById, pathTo } from "@street-wolf/core/labels";
 
 /** The path's dots, joined by a line: more dots means the outcome is more specific. */
 function Trail({ depth, color }: { depth: number; color: string }) {

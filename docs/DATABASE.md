@@ -14,7 +14,7 @@ scraper is a separate local app that talks to the same HTTP API with a Bearer to
 | `packages/db/src/indexes.ts` | Every index, created on boot (`apps/web/instrumentation.ts`) or by `pnpm db:indexes` |
 | `apps/web/app/api/**/route.ts` | HTTP endpoints (list in section 6) |
 | `apps/web/lib/server/*` | Server-only logic: `sheets.ts` (row writes and counting), `workspace.ts` (dashboard payload), `invites.ts`, `mail.ts`, `session.ts`, `access.ts` (roles), `ratelimit.ts`, `notify.ts`, `jobs.ts` |
-| `apps/web/lib/outreach.ts` | The outreach definition, shared by server and browser |
+| `packages/core/src/outreach.ts` | The outreach definition, shared by server and browser |
 | `apps/web/lib/workspace.tsx` | Browser store: hydrate, optimistic edits, background sync |
 | `apps/scraper` | Local scraper worker (claims jobs, pushes rows) |
 
@@ -34,7 +34,7 @@ All ids are strings. The browser mints UUIDs itself so the screen updates instan
 | `authTokens` | one-time sign-in link: `email`, `next`, `usedAt` | TTL 15 min, single use (atomic) |
 | `oauthStates` | Google `state`, PKCE `verifier`, `next` | TTL 10 min |
 | `apiTokens` | scraper tokens: `userId`, `name`, `prefix`, `lastUsedAt` | until revoked |
-| `campaigns` | `ownerId`, `name`, `purpose`, `features[]`, `labelTree` (custom call-outcome tree, null = built-in) | permanent |
+| `campaigns` | `ownerId`, `name`, `purpose`, `preset` (`b2b`/`b2c`/`d2c`; absent on older campaigns = b2b), `features[]` (feature ids such as `googlemaps:scrape`, `googlemaps:whatsapp`, from `platforms/<name>/platform.ts`; old ids are renamed on boot), `labelTree` (custom call-outcome tree, null = built-in) | permanent |
 | `members` | `campaignId`, `userId`, `role` (owner/admin/member), `addedBy` | unique (campaign, user) |
 | `invites` | `campaignId`, `email`, `role`, `tokenHash`, `invitedBy`, `status` (pending/accepted/revoked), `expiresAt` (14 days) | history kept |
 | `domains` | a niche in a campaign: `name`, `image`, `position` | permanent |
@@ -63,7 +63,7 @@ Every query is index-backed. They are all in `packages/db/src/indexes.ts`; the i
 
 ## 4. How outreach is counted
 
-**Definition (`lib/outreach.ts`).** A row counts as outreach when it has **any label except "Didn't pick"**. "Didn't pick" is
+**Definition (`packages/core/src/outreach.ts`).** A row counts as outreach when it has **any label except "Didn't pick"**. "Didn't pick" is
 recognised by the built-in id `no-pick` (always, even in a customised tree) or a label named "Didn't pick" / "Did not pick".
 The same function runs on the server (what is stored) and in the browser (what is shown when a sheet is open), so they agree.
 
@@ -118,7 +118,7 @@ cannot manage the account.
 | --- | --- |
 | `POST /api/auth/email`, `POST /api/auth/verify`, `GET /api/auth/google` (+`/callback`), `POST /api/auth/logout`, `GET /api/auth/providers` | sign in / out |
 | `GET /api/bootstrap` | hydrates the whole app in a fixed number of queries: user, campaigns (members, invites, domains, places, stats, per-member totals and 14-day series), unread count, incoming invites |
-| `POST/GET /api/campaigns`, `PATCH/DELETE /api/campaigns/:id` | campaigns (PATCH also saves `labelTree`) |
+| `POST/GET /api/campaigns`, `PATCH/DELETE /api/campaigns/:id` | campaigns (`preset`, `features`; PATCH also saves `labelTree`) |
 | `…/domains`, `…/domains/:did`, `…/places`, `…/places/:pid` | domains and places |
 | `GET/PATCH …/places/:pid/sheet` | read a sheet; save changed rows (returns `{applied, today}`) |
 | `GET …/places/:pid/sync` | live pull of every row (cells **and label**) changed since a cursor, for any open sheet: teammates' edits, labels and scrape results. Paged by `(updatedAt,row)` |
@@ -191,7 +191,7 @@ reconstructed, place totals can via `recount`); the chart updates for teammates 
 * **Edits are per field.** `PATCH …/sheet` takes `{row, set?, unset?, label?, isNew?}`: only the cells and label the person changed.
   A screen that is behind can never put an old label or an old cell value back. (The old whole-row format is refused with a 400.)
 * **Live sync carries labels and deletions.** The browser keeps what the server is known to hold (`baseRows`/`baseLabels`) and merges
-  incoming rows key by key; unsaved local typing wins for those keys only (`apps/web/lib/sheet-merge.ts`, unit-tested).
+  incoming rows key by key; unsaved local typing wins for those keys only (`packages/core/src/sheet-merge.ts`, unit-tested).
 * **A row emptied of cells and label stays as an empty row** (no scrape id, nothing counted) so teammates see it vanish and the number can be reused.
 * **New rows are inserted, never upserted.** The unique `(placeId,row)` index is the lock. If a scrape or teammate took that row number,
   the person's data goes to the next free row and the response lists it in `moved`; the browser follows it. A retry of a save whose answer was lost is recognised and is not treated as a collision.
@@ -202,10 +202,10 @@ reconstructed, place totals can via `recount`); the chart updates for teammates 
 * **Jobs can't wedge a sheet:** a running job whose worker went silent is failed after 3 min, a queued job nobody claimed after 30 min, and any campaign admin can stop anybody's job.
 * **Big deletes** (sheet, domain, campaign) remove leads in slices of 5,000 and can be repeated if cut off; saves are capped at 2,000 rows per request; heavy routes ask the host for up to 60 s (`maxDuration`).
 * **Invite links** are stored AES-GCM encrypted (`invites.tokenEnc`, key from `APP_SECRET`); the emailed token itself is only ever stored as a hash.
-* Tests: `pnpm e2e` (API), `pnpm test:merge` (merge rules), `pnpm e2e:browser` (two real browsers on one sheet).
+* Tests: `pnpm e2e` (API), `pnpm test` (merge rules, phone parsing), `pnpm e2e:browser` (two real browsers on one sheet).
 
 ## Call summary and the phone page
 
-* **`callSummary` is an ordinary cell key** on `leads.cells`, up to 5,000 characters like every cell. It is typed by people, so it is in `leads.edited` and a re-scrape never overwrites it. It is not in the scrape setup (`maps-fields.ts` keeps it out of `fieldGroups`); `sheetKeys()` adds it to every sheet as the 2nd column unless a person has dragged it elsewhere (their order is in `places.view.order`).
-* **Points** are text: `- first - second`. A standalone `-` starts a point (`lib/call-summary.ts`); nothing about points is stored.
+* **`callSummary` is an ordinary cell key** on `leads.cells`, up to 5,000 characters like every cell. It is typed by people, so it is in `leads.edited` and a re-scrape never overwrites it. It is not in the scrape setup (`platforms/google-maps/fields.ts` keeps it out of `fieldGroups`); `sheetKeys()` adds it to every sheet as the 2nd column unless a person has dragged it elsewhere (their order is in `places.view.order`).
+* **Points** are text: `- first - second`. A standalone `-` starts a point (`packages/core/src/call-summary.ts`); nothing about points is stored.
 * **Mobile Outreach** adds no collections or endpoints. `/m/:campaign/:domain/:city` is a page that uses the same `GET/PATCH …/sheet` and `…/sync` calls and the same optimistic store as the web sheet, behind the same session cookie. The only phone-specific state is in the browser: which columns that phone shows (`sw-mobile-cols:<place>`) and the pamphlet messages and image values (`sw-pamphlets:<campaign>`), neither synced.

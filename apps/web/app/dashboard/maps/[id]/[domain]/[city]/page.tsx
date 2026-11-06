@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { MapsSheet } from "@/components/dashboard/maps-sheet";
+import { MapsSheet } from "@street-wolf/google-maps/web";
 
 async function Body({ params }: Pick<PageProps<"/dashboard/maps/[id]/[domain]/[city]">, "params">) {
   const { id, domain, city } = await params;

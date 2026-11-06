@@ -2,10 +2,10 @@
 
 import { AnimatePresence, motion, useInView } from "motion/react";
 import { Bell, Camera, Check, CheckCheck, ChevronRight, GripVertical, MoreVertical, PartyPopper, Play, Search, Square } from "lucide-react";
-import { memo, useEffect, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { BrandIcon } from "@/components/brand-icon";
 import { LabelChip } from "@/components/dashboard/label-chip";
-import type { LabelNode } from "@/lib/labels";
+import type { LabelNode } from "@street-wolf/core/labels";
 
 // Made-up sample data; purely decorative. One new lead lands every GAP seconds and then plays out the same short story on its own
 // timeline: scraped, WhatsApp sent (one grey tick), delivered (two grey), read (two blue), and then most answer: some interested,
@@ -165,31 +165,49 @@ const SheetRow = memo(function SheetRow({ k, appeared, label }: { k: number; app
  */
 function Sheet({ s, clock, running }: { s: number; clock: RefObject<number>; running: boolean }) {
   const layer = useRef<HTMLDivElement>(null);
-  const top = useRef(topAt(clock.current));
-  const k0 = useRef(Math.floor(top.current));
+  // k0 = first row drawn. React state, so the rows on screen and the offset below always agree.
+  const [k0, setK0] = useState(() => Math.floor(topAt(s / TICK)));
+  const top = useRef<number | null>(null); // eased scroll position in rows, owned by the animation loop
+  const drawn = useRef(k0); // k0 of the last committed render
+  const wanted = useRef(k0); // k0 last asked for, so a row change triggers one render, not one per frame
+
+  const place = () => {
+    if (layer.current && top.current !== null) layer.current.style.transform = `translate3d(0, ${-(top.current - drawn.current) * ROW_H}px, 0)`;
+  };
+
+  useLayoutEffect(() => {
+    drawn.current = k0;
+    place();
+  }, [k0]);
 
   useEffect(() => {
     if (!running) return;
     let raf = 0;
     let last = performance.now();
     let prev = clock.current;
+    if (top.current === null) top.current = topAt(clock.current);
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       const t = clock.current;
       const target = topAt(t);
-      top.current = t < prev ? target : top.current + (target - top.current) * (1 - Math.exp(-dt * 3 * SPEED));
+      const cur: number = top.current ?? target;
+      top.current = t < prev ? target : cur + (target - cur) * (1 - Math.exp(-dt * 3 * SPEED));
       prev = t;
-      if (layer.current) layer.current.style.transform = `translate3d(0, ${-(top.current - k0.current) * ROW_H}px, 0)`;
+      const k = Math.floor(top.current);
+      if (k !== wanted.current) {
+        wanted.current = k;
+        setK0(k);
+      }
+      place();
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
   }, [clock, running]);
 
   const t = s / TICK;
-  k0.current = Math.floor(top.current);
-  const rows = Array.from({ length: VISIBLE }, (_, i) => k0.current + i);
+  const rows = Array.from({ length: VISIBLE }, (_, i) => k0 + i);
 
   return (
     <div className="mt-5 flex flex-col overflow-hidden rounded-2xl border border-neutral-300 bg-white">

@@ -1,6 +1,7 @@
 // Node-only boot work (kept out of instrumentation.ts so the Edge analyzer never sees process APIs).
 import { closeClient, ensureIndexes } from "@street-wolf/db";
 import { sealLegacyInviteTokens } from "./lib/server/invites";
+import { migrateFeatureIds } from "./lib/server/migrations";
 
 export async function boot() {
   if (!process.env.MONGODB_URI) return;
@@ -10,6 +11,7 @@ export async function boot() {
       await ensureIndexes();
       console.log("[db] indexes ready");
       await sealLegacyInviteTokens();
+      await migrateFeatureIds();
     } catch (e) {
       console.error("[db] could not prepare the database:", e);
     }

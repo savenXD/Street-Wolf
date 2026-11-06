@@ -77,6 +77,8 @@ x-cron-secret: <CRON_SECRET>
 - Load balancer / platform health check: `GET /api/health`. Uptime monitor: `GET /api/health?deep=1` (also checks MongoDB).
 - On serverless hosts (Vercel) every instance has its own connection pool. Keep `MONGODB_POOL` small (for example `10`) so many instances stay under Atlas's connection limit
   (M0: 500, M10: 1,500), and set `ENSURE_INDEXES=false` once you have run `pnpm db:indexes` (saves ~16 round trips per cold start).
+  The same switch also skips the one-time data migrations (`apps/web/lib/server/migrations.ts`, e.g. renamed feature ids). Old
+  data still reads correctly without them; to rewrite it, start the app once with `ENSURE_INDEXES=true` after a release that adds one.
 - Check logs for lines starting `{"at":"api"`: they are the 5xx and slow requests, each with a request id that is also returned to the client as `X-Request-Id`.
 
 ## 7. Custom domain (when you have one)

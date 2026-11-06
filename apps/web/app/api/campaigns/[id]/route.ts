@@ -5,13 +5,14 @@ import { requireRole } from "@/lib/server/access";
 import { api, body, ok, uuid } from "@/lib/server/http";
 import { notify } from "@/lib/server/notify";
 import { requireBrowserUser } from "@/lib/server/session";
-import { featureIds } from "@/lib/server/schemas";
-import { nonOutreachIds } from "@/lib/outreach";
+import { featureIds, preset } from "@/lib/server/schemas";
+import { nonOutreachIds } from "@street-wolf/core/outreach";
 import { purgeLeads, repairCampaign } from "@/lib/server/sheets";
 
 const Patch = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   purpose: z.string().trim().max(500).optional(),
+  preset: preset.optional(),
   features: featureIds.optional(),
   labelTree: z.unknown().nullable().optional(),
 });

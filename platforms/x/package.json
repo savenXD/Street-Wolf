@@ -1,0 +1,24 @@
+{
+  "name": "@street-wolf/x",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "exports": {
+    "./platform": "./platform.ts",
+    "./fields": "./fields.ts",
+    "./worker": "./scrape/worker/index.ts"
+  },
+  "dependencies": {
+    "@street-wolf/platform-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "eslint": "^9",
+    "patchright": "^1.55.0",
+    "typescript": "^5"
+  }
+}

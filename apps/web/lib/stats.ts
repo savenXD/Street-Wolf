@@ -1,4 +1,4 @@
-import { countsAsOutreach, nonOutreachIds } from "@/lib/outreach";
+import { countsAsOutreach, nonOutreachIds } from "@street-wolf/core/outreach";
 import type { Campaign, City } from "@/lib/workspace";
 
 export type Stats = { leads: number; outreached: number; converted: number };

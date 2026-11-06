@@ -1,10 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { LabelNode } from "@/lib/labels";
+import type { CampaignPreset } from "@street-wolf/db";
+import type { LabelNode } from "@street-wolf/core/labels";
 import { clearToday, setToday } from "@/lib/presence";
-import type { ScrapeConfig } from "@/lib/maps-fields";
-import { type Change, diffRow, EMPTY, isEmpty, mergeRows, type Row, sameRow, type SheetBase } from "@/lib/sheet-merge";
+import type { ScrapeConfig } from "@street-wolf/google-maps/fields";
+import { type Change, diffRow, EMPTY, isEmpty, mergeRows, type Row, sameRow, type SheetBase } from "@street-wolf/core/sheet-merge";
 
 /**
  * The client store. The server (MongoDB) is the source of truth: edits update the screen immediately, then sync in the
@@ -56,6 +57,8 @@ export type PendingInvite = { id: string; email: string; role: string; at: numbe
 export type ServerStats = { totals: Counts; perMember: Record<string, Counts>; perDay: Record<string, number[]> };
 export type Campaign = {
   id: string; name: string; purpose: string; features: string[]; team: string[]; domains: Domain[];
+  /** b2b / b2c / d2c: see lib/presets.ts. */
+  preset?: CampaignPreset;
   /** Custom call-outcome labels; the built-in tree when absent. */
   labelTree?: LabelNode;
   createdAt: number;
@@ -135,7 +138,7 @@ type Workspace = {
   deleteCampaign: (campaignId: string) => void;
   acceptInvite: (inviteId: string) => Promise<void>;
   declineInvite: (inviteId: string) => Promise<void>;
-  addCampaign: (c: Pick<Campaign, "name" | "purpose" | "features" | "team">) => void;
+  addCampaign: (c: Pick<Campaign, "name" | "purpose" | "preset" | "features" | "team">) => void;
   addDomain: (campaignId: string, name: string, image?: string) => void;
   removeDomain: (campaignId: string, domainId: string) => void;
   addCity: (campaignId: string, domainId: string, name: string) => void;
@@ -598,7 +601,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           ...l,
           campaigns: [{ ...c, domains: [], id, createdAt: Date.now(), ...(mine && { myRole: "owner" as Role, members: [mine], pendingInvites: [] }) }, ...l.campaigns],
         }));
-        api(call("POST", "/api/campaigns", { id, name: c.name, purpose: c.purpose, features: c.features, team: c.team }).then(refresh));
+        api(call("POST", "/api/campaigns", { id, name: c.name, purpose: c.purpose, preset: c.preset, features: c.features, team: c.team }).then(refresh));
       },
       addDomain: (cid, name, image) => {
         const id = crypto.randomUUID();
